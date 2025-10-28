@@ -1,0 +1,139 @@
+/**
+  ******************************************************************************
+  * @vendor		CRETEM
+  * @project	Automatic_Drawer
+  * @file		UART.H
+  * @author  	Firmware Team(Nexus)
+  ******************************************************************************/
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __TOUCH_H__
+#define __TOUCH_H__
+
+#ifdef __cplusplus
+ extern "C" {
+#endif
+
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+/* Exported types ------------------------------------------------------------*/
+typedef	struct _coordinate{
+	uint16_t x;
+   	uint16_t y;
+   	uint8_t state;
+   	uint8_t pressed;
+	uint8_t change;
+}coordinate;
+
+typedef struct _matrix{
+	long double An,
+            	Bn,
+            	Cn,
+            	Dn,
+            	En,
+            	Fn,
+            	Divider ;
+}matrix;
+
+typedef enum{
+	TOUCH_STATE_IDLE = 0,
+	TOUCH_STATE_PRESS,
+	TOUCH_STATE_X_UNKONW,
+	TOUCH_STATE_Y_UNKONW,
+	TOUCH_STATE_CHECK
+}TOUCH_STATE;
+
+typedef enum{
+	TOUCH_CHANGE_IDLE = 0,
+	TOUCH_CHANGE_PUSH,
+	TOUCH_CHANGE_POP_WAIT,
+	TOUCH_CHANGE_POP,
+	TOUCH_CHANGE_IDLE_WAIT
+}TOUCH_CHANGE;
+
+typedef enum{
+	TOUCH_IDLE = 0,
+	TOUCH_CS_DELAY,
+	TOUCH_PIN_CHECK,
+	TOUCH_READ_END,
+	TOUCH_RESULT,
+	TOUCH_GUI_CHANGE
+}TOUCH_MOD;
+/* Exported constants --------------------------------------------------------*/
+extern matrix _matrix;
+extern coordinate _screen_sample[];
+extern coordinate _display_sample[];
+extern coordinate _new_screen_sample[];
+extern coordinate _new_display_sample[];
+
+extern volatile BYTE _handle_touchflag;
+
+extern BYTE _spi2_rx_buffer[];
+extern BYTE _spi2_tx_buffer[];
+/* Exported define -----------------------------------------------------------*/
+
+
+#define Open_TP_CS_PIN					GPIO_Pin_5
+#define Open_TP_CS_PORT					GPIOD
+#define Open_TP_CS_CLK					RCC_AHB1Periph_GPIOD
+
+#define Open_TP_IRQ_PIN					GPIO_Pin_3
+#define Open_TP_IRQ_PORT				GPIOE
+#define Open_TP_IRQ_CLK					RCC_AHB1Periph_GPIOE
+
+#define TP_CS(x)	x ? GPIO_SetBits(Open_TP_CS_PORT,Open_TP_CS_PIN): GPIO_ResetBits(Open_TP_CS_PORT,Open_TP_CS_PIN)
+
+#define TP_INT_IN   					GPIO_ReadInputDataBit(Open_TP_IRQ_PORT,Open_TP_IRQ_PIN)
+
+#define Open_RCC_SPI   	        		RCC_APB1Periph_SPI2
+#define Open_GPIO_AF_SPI 				GPIO_AF_SPI2
+
+#define Open_SPI                        SPI2
+#define Open_SPI_CLK_INIT               RCC_APB1PeriphClockCmd
+#define Open_SPI_IRQn                   SPI2_IRQn
+#define Open_SPI_IRQHANDLER             SPI2_IRQHandler
+
+#define Open_SPI_SCK_PIN                GPIO_Pin_13
+#define Open_SPI_SCK_GPIO_PORT          GPIOB
+#define Open_SPI_SCK_GPIO_CLK           RCC_AHB1Periph_GPIOB
+#define Open_SPI_SCK_SOURCE             GPIO_PinSource13
+
+#define Open_SPI_MISO_PIN               GPIO_Pin_14
+#define Open_SPI_MISO_GPIO_PORT         GPIOB
+#define Open_SPI_MISO_GPIO_CLK          RCC_AHB1Periph_GPIOB
+#define Open_SPI_MISO_SOURCE            GPIO_PinSource14
+
+#define Open_SPI_MOSI_PIN               GPIO_Pin_15
+#define Open_SPI_MOSI_GPIO_PORT         GPIOB
+#define Open_SPI_MOSI_GPIO_CLK          RCC_AHB1Periph_GPIOB
+#define Open_SPI_MOSI_SOURCE            GPIO_PinSource15
+
+#define	CHX 							0x90
+#define	CHY 							0xd0
+
+#define SPI_TIMEOUT_COUNT				0xffff
+
+#define NUM_LOW_CAL_POINTS  			3  // Number of points for calibration
+
+#define EEP_TOUCH_CALIBRATION_MAGIC_CODE	0x4F
+#define EEP_TOUCH_CALIBRATION_nMAGIC_CODE	0
+/* Exported macro ------------------------------------------------------------*/
+#define SPI_DMA_WR()		DMA1_Stream3->M0AR = (uint32_t)_spi2_rx_buffer;		\
+							DMA1_Stream3->NDTR = 6;	\
+							DMA1_Stream4->M0AR = (uint32_t)_spi2_tx_buffer;		\
+							DMA1_Stream4->NDTR = 6;	\
+							DMA_Cmd(DMA1_Stream3, ENABLE);	\
+							DMA_Cmd(DMA1_Stream4, ENABLE)
+/* Exported functions ------------------------------------------------------- */
+extern void TSC_Configuration(void);
+extern void Touch_Process(void);
+FunctionalState setCalibrationMatrix(coordinate * displayPtr,coordinate * screenPtr,matrix * matrixPtr);
+FunctionalState getDisplayPoint(coordinate * displayPtr,coordinate * screenPtr,matrix * matrixPtr);
+extern void ADS7843_DmaRx_Configuration(void);
+extern void ADS7843_DmaTx_Configuration(void);
+extern void SPI_DMA_WRITE(void);
+#ifdef __cplusplus
+}
+#endif
+#endif /* __TOUCH_H__ */
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+

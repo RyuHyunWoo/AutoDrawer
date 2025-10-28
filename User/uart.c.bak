@@ -1,0 +1,1216 @@
+/**
+  ******************************************************************************
+  * @vendor		CRETEM
+  * @project	Automatic_Drawer
+  * @file		UART.C
+  * @author  	Firmware Team(Nexus)
+  ******************************************************************************/
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+/* Private typedef -----------------------------------------------------------*/
+typedef enum{
+	USART1_RX_TC_PRIORITY = 0,
+	USART1_DMA_TX_PRIORITY,
+	USART6_DMA_TX_PRIORITY,
+}USART_PRIORITY_Typedef;
+
+const uint8_t USART_SET_PREEMPTION_PRIORITY[USARTn] = {NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0};
+const uint8_t USART_SET_SUB_PRIORITY[USARTn] = {NVIC_SUB_PRIORITY_5,NVIC_SUB_PRIORITY_6,NVIC_SUB_PRIORITY_15};
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+/* Private variables ---------------------------------------------------------*/
+debug_uart_send 	_debug_send;
+debug_uart_receive 	_debug_receive;
+
+main_uart_send _main_send;
+main_uart_receive _main_receive;
+
+/* Private function prototypes -----------------------------------------------*/
+/* Private functions ---------------------------------------------------------*/
+/**
+* @brief  Initializes the target hardware.
+* @param  None
+* @retval None
+*/
+#ifdef __GNUC__
+  	/* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
+     set to 'Yes') calls __io_putchar() */
+  	#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+  	#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+
+void putch(char temp){
+	_debug_send.buffer[_debug_send.put_index++] = temp;
+	if(_debug_send.put_index >= _DEBUG_UART_SEND_BUFFER_SIZE)
+		_debug_send.put_index = 0;
+}
+int fputc(int ch, FILE *f){
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART */
+  putch(ch);
+
+  return ch;
+}
+
+void USART1_DMA_Tx_Configuration(void){
+  	DMA_InitTypeDef DMA_InitStructure;
+	NVIC_InitTypeDef NVIC_InitStructure;
+
+  	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA2, ENABLE);
+
+	DMA_InitStructure.DMA_DIR = DMA_DIR_MemoryToPeripheral;
+	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+  	DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+  	DMA_InitStructure.DMA_Mode = DMA_Mode_Normal;
+  	DMA_InitStructure.DMA_Priority = DMA_Priority_VeryHigh;
+	DMA_InitStructure.DMA_FIFOMode = DMA_FIFOMode_Disable;					  // Mode fifo valide
+	DMA_InitStructure.DMA_FIFOThreshold = DMA_FIFOMode_Disable;	  // Taille de la fifo : HalfFull (2 words, 8 octets)
+	DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single; 			  // Transfert en memoire en un seul burst
+	DMA_InitStructure.DMA_PeripheralBurst = DMA_PeripheralBurst_Single; 	  // Transfert du peripherique en 1 seul burst
+
+  	DMA_InitStructure.DMA_Channel = DMA_Channel_4;							  // DMA channel 0
+	//DMA_InitStructure.DMA_BufferSize = _MAIN_UART_SEND_DMA_SIZE;
+	DMA_InitStructure.DMA_BufferSize = 1;
+  	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&USART1->DR;
+  	//DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)_main_send.dma_buffer;
+  	DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)_main_send.buffer[0].data;
+
+	DMA_Init(DMA2_Stream7, &DMA_InitStructure);
+
+	USART_DMACmd(USART1, USART_DMAReq_Tx, ENABLE);
+	NVIC_InitStructure.NVIC_IRQChannel = DMA2_Stream7_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = USART_SET_PREEMPTION_PRIORITY[USART1_DMA_TX_PRIORITY];
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = USART_SET_SUB_PRIORITY[USART1_DMA_TX_PRIORITY];
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  	NVIC_Init(&NVIC_InitStructure);
+
+	DMA_ITConfig(DMA2_Stream7, DMA_IT_TC, ENABLE);
+}
+
+void USART1_DMA_Rx_Configuration(void){
+  	DMA_InitTypeDef DMA_InitStructure;
+
+  	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA2, ENABLE);
+
+	DMA_DeInit(DMA2_Stream2);
+	while(DMA_GetCmdStatus(DMA2_Stream2) != DISABLE);
+
+	DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralToMemory;
+	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+  	DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+  	DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+  	DMA_InitStructure.DMA_Priority = DMA_Priority_VeryHigh;
+	DMA_InitStructure.DMA_FIFOMode = DMA_FIFOMode_Disable;					  // Mode fifo valide
+	DMA_InitStructure.DMA_FIFOThreshold = DMA_FIFOMode_Disable;	  // Taille de la fifo : HalfFull (2 words, 8 octets)
+	DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single; 			  // Transfert en memoire en un seul burst
+	DMA_InitStructure.DMA_PeripheralBurst = DMA_PeripheralBurst_Single; 	  // Transfert du peripherique en 1 seul burst
+
+  	DMA_InitStructure.DMA_Channel = DMA_Channel_4;							  // DMA channel 0
+	DMA_InitStructure.DMA_BufferSize = _MAIN_UART_RECEIVE_BUFFER_SIZE;
+  	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&USART1->DR;
+  	DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)_main_receive.buffer;
+
+   	DMA_Init(DMA2_Stream2, &DMA_InitStructure);
+
+	USART_DMACmd(USART1, USART_DMAReq_Rx, ENABLE);
+
+	DMA_Cmd(DMA2_Stream2, ENABLE);
+}
+
+void USART1_Configuration(void){
+  	USART_InitTypeDef USART_InitStructure;
+	GPIO_InitTypeDef GPIO_InitStructure;
+	NVIC_InitTypeDef NVIC_InitStructure;
+
+  	/* --------------------------- System Clocks Configuration -----------------*/
+  	/* USART1 clock enable */
+  	RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1, ENABLE);
+
+	/* GPIOA clock enable */
+	RCC_AHB1PeriphClockCmd(USART1_GPIO_CLK, ENABLE);
+    /*-------------------------- GPIO Configuration ----------------------------*/
+  	GPIO_InitStructure.GPIO_Pin = USART1_TX_PIN;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+  	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+  	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_Init(USART1_GPIO_PORT, &GPIO_InitStructure);
+
+  	GPIO_InitStructure.GPIO_Pin = USART1_RX_PIN;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+  	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+  	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_Init(USART1_GPIO_PORT, &GPIO_InitStructure);
+	/* Connect USART pins to AF */
+  	GPIO_PinAFConfig(USART1_GPIO_PORT, GPIO_PinSource9, GPIO_AF_USART1); // USART1_TX
+  	GPIO_PinAFConfig(USART1_GPIO_PORT, GPIO_PinSource10, GPIO_AF_USART1); // USART1_RX
+
+  	USART_InitStructure.USART_BaudRate = 115200;
+  	USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+  	USART_InitStructure.USART_StopBits = USART_StopBits_1;
+  	USART_InitStructure.USART_Parity = USART_Parity_No;
+  	USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+
+  	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+
+  	USART_Init(USART1, &USART_InitStructure);
+
+  	USART_Cmd(USART1, ENABLE);
+
+	/* Enable USART6 Receive interrupt */
+  	//USART_ITConfig(USART1, USART_IT_RXNE, ENABLE);
+	//USART_ITConfig(USART1, USART_IT_TC, ENABLE);
+
+    /* Enable the USART6 Interrupt */
+  	NVIC_InitStructure.NVIC_IRQChannel = USART1_IRQn; 	   // we want to configure the USART1 interrupts
+  	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = USART_SET_PREEMPTION_PRIORITY[USART1_RX_TC_PRIORITY];// this sets the priority group of the USART1 interrupts
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = USART_SET_SUB_PRIORITY[USART1_RX_TC_PRIORITY];	   // this sets the subpriority inside the group
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;		   // the USART1 interrupts are globally enabled
+  	NVIC_Init(&NVIC_InitStructure);
+}
+
+
+void DEBUG_Configuration(void){
+  	USART_InitTypeDef USART_InitStructure;
+	GPIO_InitTypeDef GPIO_InitStructure;
+	//NVIC_InitTypeDef NVIC_InitStructure;
+
+  	/* --------------------------- System Clocks Configuration -----------------*/
+  	/* USART1 clock enable */
+  	RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART6, ENABLE);
+
+	/* GPIOC clock enable */
+	RCC_AHB1PeriphClockCmd(USART_DEBUG_GPIO_CLK, ENABLE);
+
+    /*-------------------------- GPIO Configuration ----------------------------*/
+  	GPIO_InitStructure.GPIO_Pin = USART_DEBUG_TX_PIN;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+  	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+  	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_Init(USART_DEBUG_GPIO_PORT, &GPIO_InitStructure);
+
+  	GPIO_InitStructure.GPIO_Pin = USART_DEBUG_RX_PIN;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+  	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+  	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_Init(USART_DEBUG_GPIO_PORT, &GPIO_InitStructure);
+	/* Connect USART pins to AF */
+  	GPIO_PinAFConfig(USART_DEBUG_GPIO_PORT, GPIO_PinSource6, GPIO_AF_USART6); // USART1_TX
+  	GPIO_PinAFConfig(USART_DEBUG_GPIO_PORT, GPIO_PinSource7, GPIO_AF_USART6); // USART1_RX
+
+  	USART_InitStructure.USART_BaudRate = 115200;
+  	USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+  	USART_InitStructure.USART_StopBits = USART_StopBits_1;
+  	USART_InitStructure.USART_Parity = USART_Parity_No;
+  	USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+
+  	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+
+  	USART_Init(USART6, &USART_InitStructure);
+
+	//Initialize_USART1_DMA();
+
+  	USART_Cmd(USART6, ENABLE);
+#if 0
+	/* Enable USART1 Receive interrupt */
+  	USART_ITConfig(USART6, USART_IT_RXNE, ENABLE);
+	USART_ITConfig(USART6, USART_IT_TC, ENABLE);
+
+    /* Enable the USART1 Interrupt */
+  	NVIC_InitStructure.NVIC_IRQChannel = USART6_IRQn; 	   // we want to configure the USART1 interrupts
+  	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;// this sets the priority group of the USART1 interrupts
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = _USART_DEBUG_INTERRUPT_PRIORITY;	   // this sets the subpriority inside the group
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;		   // the USART1 interrupts are globally enabled
+  	NVIC_Init(&NVIC_InitStructure);
+#endif
+}
+
+void DEBUG_DMA_Configuration(void){
+  	DMA_InitTypeDef DMA_InitStructure;
+	NVIC_InitTypeDef NVIC_InitStructure;
+
+  	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA2, ENABLE);
+
+	DMA_InitStructure.DMA_DIR = DMA_DIR_MemoryToPeripheral;
+	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+  	DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+  	DMA_InitStructure.DMA_Mode = DMA_Mode_Normal;
+  	DMA_InitStructure.DMA_Priority = DMA_Priority_VeryHigh;
+	DMA_InitStructure.DMA_FIFOMode = DMA_FIFOMode_Disable;					  // Mode fifo valide
+	DMA_InitStructure.DMA_FIFOThreshold = DMA_FIFOMode_Disable;	  // Taille de la fifo : HalfFull (2 words, 8 octets)
+	DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single; 			  // Transfert en memoire en un seul burst
+	DMA_InitStructure.DMA_PeripheralBurst = DMA_PeripheralBurst_Single; 	  // Transfert du peripherique en 1 seul burst
+
+  	DMA_InitStructure.DMA_Channel = DMA_Channel_5;							  // DMA channel 0
+	//DMA_InitStructure.DMA_BufferSize = _MAIN_UART_SEND_DMA_SIZE;
+	DMA_InitStructure.DMA_BufferSize = 1;
+  	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&USART6->DR;
+  	DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)_debug_send.dma_buffer;
+
+   	DMA_Init(DMA2_Stream6, &DMA_InitStructure);
+	//DMA_Cmd(DMA2_Stream7, ENABLE);
+
+	USART_DMACmd(USART6, USART_DMAReq_Tx, ENABLE);
+
+	NVIC_InitStructure.NVIC_IRQChannel = DMA2_Stream6_IRQn;
+  	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = USART_SET_PREEMPTION_PRIORITY[USART6_DMA_TX_PRIORITY];
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = USART_SET_SUB_PRIORITY[USART6_DMA_TX_PRIORITY];
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  	NVIC_Init(&NVIC_InitStructure);
+
+	DMA_ITConfig(DMA2_Stream6, DMA_IT_TC, ENABLE);
+}
+
+void Usart_Configuration(void){
+	DEBUG_Configuration();
+	DEBUG_DMA_Configuration();
+
+	USART1_Configuration();
+	USART1_DMA_Tx_Configuration();
+	USART1_DMA_Rx_Configuration();
+}
+
+void Send_USART6_TxDMA(void){
+    DMA2_Stream6->M0AR = (uint32_t)_debug_send.dma_buffer;
+    DMA2_Stream6->NDTR = _debug_send.dma_count;
+    DMA2_Stream6->CR |= (uint32_t)DMA_SxCR_EN;
+}
+
+void Send_USART1_TxDMA(void){
+	uart_buffer_module *buffer;
+
+	buffer = &_main_send.buffer[_main_send.buffer_get_index];
+
+    DMA2_Stream7->M0AR = (uint32_t)buffer->data;
+    DMA2_Stream7->NDTR = buffer->count;
+    DMA2_Stream7->CR |= (uint32_t)DMA_SxCR_EN;
+	USART1->SR = (uint16_t)~USART_FLAG_TC;
+}
+
+void Debug_Send_Process(void){
+	debug_uart_send *send = &_debug_send;
+
+	if(send->transmit_line_ready == _FALSE)		return;
+
+    if(send->get_index != send->put_index){
+		DMA2->HIFCR = (DMA_HISR_TCIF6 | DMA_FLAG_HTIF6);
+		send->dma_count = 0;
+		do{
+			send->dma_buffer[send->dma_count++] = send->buffer[send->get_index++];
+			if(send->get_index >= _DEBUG_UART_SEND_BUFFER_SIZE)		send->get_index = 0;
+			if(send->dma_count >= _DEBUG_UART_SEND_DMA_SIZE)		send->dma_count = 0;
+		}while(send->get_index != send->put_index);
+		send->transmit_line_ready = _FALSE;
+		Send_USART6_TxDMA();
+	}
+}
+
+void Main_Send_Process(void){
+	main_uart_send *send = &_main_send;
+
+	if(send->transmit_line_ready == _FALSE)		return;
+
+	if(send->buffer_get_index != send->buffer_get_index){
+		TX_ENABLE();
+		DMA2->HIFCR = (DMA_HISR_TCIF7 | DMA_FLAG_HTIF7);
+		send->transmit_line_ready = _FALSE;
+		Send_USART1_TxDMA();
+
+		send->buffer_get_index++;
+		if(send->buffer_get_index >= _MAIN_UART_SEND_BUFFER_ARRY)	send->buffer_get_index = 0;
+	}
+}
+
+char bin_to_ascii(char bin_value)
+{
+    if(bin_value>=0x0a) return('A'+bin_value-0x0a);
+    else return(bin_value+'0');
+}
+
+BYTE ascii_to_hex(BYTE temp1, BYTE temp2)
+{
+	if(temp1<0x3A)
+	   temp1=temp1-'0';
+	else
+	  temp1=temp1-'A'+0x0a;
+
+	if(temp2<0x3A)
+	   temp2=temp2-'0';
+	else
+	   temp2=temp2-'A'+0x0a;
+
+	return(((temp1<<4) & 0xf0) + (temp2 & 0x0f));
+}
+
+void MakeTxPacket(BYTE bDataLen, BYTE *bData){
+	main_uart_send *send = &_main_send;
+	uart_buffer_module *buffer;
+	WORD put_count = 0;
+	BYTE lrc = 0;
+
+	buffer = &send->buffer[send->buffer_put_index];
+
+	send->length.W = (WORD)bDataLen * 2;
+
+	buffer->data[put_count++] = ASCII_STX;
+	buffer->data[put_count++] = bin_to_ascii((my_address.B.high>>4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(my_address.B.high & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((my_address.B.low>>4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(my_address.B.low & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((send->packet_number>>4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(send->packet_number & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii(((_main_receive.command | 0x80)>>4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(_main_receive.command & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((send->extension_command>>4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(send->extension_command & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((send->length.B.high >> 4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(send->length.B.high & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((send->length.B.low >> 4)&0x0f);
+	buffer->data[put_count++] = bin_to_ascii(send->length.B.low & 0x0f);
+
+	for(WORD i = 0; i < bDataLen; i++){
+		buffer->data[put_count++] = bin_to_ascii((bData[i]>>4)&0x0f);
+		buffer->data[put_count++] = bin_to_ascii(bData[i]&0x0f);
+	}
+
+	for(WORD i = 1; i< put_count;i++){
+		lrc ^= buffer->data[i];
+	}
+
+	buffer->data[put_count++] = bin_to_ascii((send->lrc>>4) & 0x0f);
+	buffer->data[put_count++] = bin_to_ascii((send->lrc & 0x0f));
+
+	buffer->data[put_count++] = ASCII_ETX;
+
+	buffer->count = put_count;
+	send->buffer_put_index++;
+	if(send->buffer_put_index >= _MAIN_UART_SEND_BUFFER_ARRY)	send->buffer_put_index = 0;
+
+	Main_Send_Process();
+}
+BYTE RecvPcPacket(void){
+	static BYTE step = 0;
+	BYTE  b,result = _FALSE;
+	static WORD ascii_count = 0;
+	static BYTE data_count = 0;
+	static BYTE b_temp,lrc;
+	main_uart_receive *receive = &_main_receive;
+
+	receive->put_index = _MAIN_UART_RECEIVE_BUFFER_SIZE - DMA_GetCurrDataCounter(DMA2_Stream2);
+
+	if(receive->put_index == receive->get_index)	return result;
+
+	b = receive->buffer[receive->get_index++];
+
+	if(receive->get_index >= _MAIN_UART_RECEIVE_BUFFER_SIZE) 	receive->get_index = 0;
+
+	if((GetElapsedTickCount(receive->last_time) > UART_RECEIVE_INTERVAL) || (b == ASCII_STX)){
+		step=0;
+	}
+	receive->last_time = _tick_count;
+
+	switch(step){
+		case 0: // STX
+			if(b == ASCII_STX){
+				ascii_count = 0;
+				lrc = 0;
+				step = 1;
+			}
+			break;
+		case 1:  // Addr H
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->address.B.high = ascii_to_hex(b_temp,b);
+				ascii_count = 0;
+				step = 2;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 2:  // Addr L
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->address.B.low = ascii_to_hex(b_temp,b);
+				ascii_count = 0;
+				step = 3;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 3: // packet no
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->packet_number = ascii_to_hex(b_temp,b);
+				ascii_count = 0;
+				step = 4;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 4: // Command
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->command = ascii_to_hex(b_temp,b);
+				ascii_count =0;
+				step = 5;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 5: // EXT Command
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->extension_command = ascii_to_hex(b_temp,b);
+				ascii_count = 0;
+				step = 6;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 6:
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->length.B.high = ascii_to_hex(b_temp,b);
+				ascii_count = 0;
+				step = 7;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 7:
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->length.B.low = ascii_to_hex(b_temp,b);
+				if(receive->length.W){
+					data_count = 0;
+					step = 8;
+				}else{
+					step = 9;
+				}
+				ascii_count = 0;
+			}else{
+				b_temp = b;
+			}
+			lrc ^= b;
+			break;
+		case 8: //Data
+			ascii_count++;
+			if(ascii_count & 0x01){
+				b_temp = b;
+			}else{
+				if(data_count < _MAIN_UART_RECRIVE_PAYLOAD_SIZE)
+					receive->payload[data_count++] = ascii_to_hex(b_temp,b);
+			}
+
+			if(ascii_count == receive->length.W){
+				ascii_count = 0;
+				step = 9;
+			}
+			lrc ^= b;
+			break;
+		case 9: // Lrc
+			ascii_count++;
+			if(ascii_count == 2){
+				receive->lrc = ascii_to_hex(b_temp,b);
+				step = 10;
+			}else{
+				b_temp = b;
+			}
+			break;
+		case 10:
+			if(b == ASCII_ETX){
+				if(lrc == receive->lrc)		result = _TRUE;
+			}
+			step = 0;
+			break;
+	}
+	return result;
+}
+
+void ReqStatus(void)
+{
+	main_uart_send *send = &_main_send;
+
+	send->packet_number++;
+	send->payload[0] = 0;
+	send->payload[1] = draw_status.status_list.byte[STATUS_1ST];
+	send->payload[2] = draw_status.status_list.byte[STATUS_2ND];
+	send->payload[3] = draw_status.status_list.byte[STATUS_RST];
+	//send->payload[4] = draw_order.my_location;//draw_status.current_point;
+	if((draw_status.status_list.bit.open_limit) && (draw_order.my_location == DRAW_PARAM_OPEN)){		//2019-10-07 AP는 OPEN 파라미터(내부적 사용)는 사용하지 않고, 최종 파라미터만 사용하기에
+		send->payload[4] = draw_encoder.draw_final_param;
+	}else{
+		send->payload[4] = draw_order.my_location;
+	}
+	send->payload[5] = draw_order.fault_location;//draw_status.error_point;
+	send->payload[6] = (BYTE)((draw_encoder.draw_my_encoder >> 8) & 0xff);
+	send->payload[7] = (BYTE)(draw_encoder.draw_my_encoder & 0xff);
+
+	MakeTxPacket(8, send->payload);
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Status!!\r\n");
+#endif
+#endif
+}
+
+void RecvOk(void)
+{
+	draw_status.status_list.byte[1] = false;
+}
+
+void ReqVer(void)
+{
+	main_uart_send *send = &_main_send;
+
+	BYTE ChekVer[] = CHECKVERSION;
+	BYTE length;
+
+	length = strlen((char*)ChekVer)-3;
+
+	send->packet_number++;
+	ChekVer[3] = 0;
+
+	MakeTxPacket(length, &ChekVer[3]);
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Version!!\r\n");
+#endif
+#endif
+}
+
+void ReqInit(void)
+{
+	main_uart_send *send = &_main_send;
+
+	send->packet_number++;
+	send->payload[0] = 0x00;
+
+	draw_order.order_list.bit.watchdog = false;
+	draw_order.order_list.byte[0] = false;
+	draw_encoder.draw_my_encoder = 0;
+
+	if(draw_status.status_list.bit.close_limit == false)		draw_status.status_list.bit.init_cmpl = false;
+
+	draw_status.status_list.byte[1] = false;
+	draw_status.status_list.byte[0] = (draw_status.status_list.byte[0] & 0x0f);
+
+	send->payload[0] = 0;
+	send->payload[1] = draw_status.status_list.byte[0];
+	send->payload[2] = draw_status.status_list.byte[1];
+
+	Display.step = DISP_DRAW_DEFAULT;
+
+	MakeTxPacket(3, send->payload);
+#ifdef DEBUG
+#ifdef DEBUG_UART
+ 	printf("Request Init!!\r\n");
+#endif
+#endif
+}
+
+
+void ReqMove(void)
+{
+	main_uart_send *send = &_main_send;
+	main_uart_receive *receive = &_main_receive;
+	//WORD temp;
+	BYTE b;
+
+	b = receive->payload[0];
+
+	if(draw_order.order_list.bit.auth_access_token == true){
+		send->payload[0] = 0x02;
+	}else{
+		if(draw_status.status_list.bit.init_cmpl == true){
+			if(((draw_status.status_list.bit.active == true) || (draw_status.status_list.bit.manual == true))
+				|| (draw_status.status_list.byte[1] == true)){
+				send->payload[0] = 0x01;
+			}else{
+				if(draw_status.status_list.bit.active_lock == false){
+					//if(b > draw_encoder.draw_final_param)	b = DRAW_PARAM_OPEN;
+
+					switch(b){
+						case DRAW_PARAM_01:
+						case DRAW_PARAM_02:
+						case DRAW_PARAM_03:
+						case DRAW_PARAM_04:
+						case DRAW_PARAM_05:
+						case DRAW_PARAM_06:
+						case DRAW_PARAM_07:
+						case DRAW_PARAM_08:
+						case DRAW_PARAM_09:
+						case DRAW_PARAM_10:
+						case DRAW_PARAM_11:
+						case DRAW_PARAM_12:
+						case DRAW_PARAM_13:
+						case DRAW_PARAM_14:
+						case DRAW_PARAM_15:
+						case DRAW_PARAM_16:
+						case DRAW_PARAM_17:
+						case DRAW_PARAM_18:
+						case DRAW_PARAM_19:
+						case DRAW_PARAM_20:
+						case DRAW_PARAM_CLOSE:
+							draw_order.order_location = b;
+							send->payload[0] = 0x00;
+
+							draw_order.last_direction = draw_order.direction;
+
+							if(draw_order.my_location == draw_order.order_location){
+								if((draw_order.order_location != DRAW_PARAM_CLOSE) && (draw_order.order_location != DRAW_PARAM_OPEN)){
+									if(draw_encoder.draw_my_encoder > (draw_encoder.draw_enc_point[draw_order.order_location] + MINIMUM_INTERVAL)){
+										if(draw_order.order_location < DRAW_PARAM_OPEN)		draw_order.my_location++;
+										draw_order.direction = DRAW_DIR_CLOSE;
+										draw_status.status_list.bit.active = true;
+										draw_order.order_list.bit.remote_order = true;
+										draw_status.status_list.bit.manual_lock = true;
+										draw_order.move_order = true;
+										draw_status.encoder_time = _tick_count;
+										draw_status.timeout_time = _tick_count;
+										draw_order.order_list.bit.watchdog = true;
+									}else if(draw_encoder.draw_my_encoder < (draw_encoder.draw_enc_point[draw_order.my_location] - MINIMUM_INTERVAL)){
+										if(draw_order.order_location > DRAW_PARAM_CLOSE)			draw_order.my_location--;
+										draw_order.direction = DRAW_DIR_OPEN;
+										draw_status.status_list.bit.active = true;
+										draw_order.order_list.bit.remote_order = true;
+										draw_status.status_list.bit.manual_lock = true;
+										draw_order.move_order = true;
+										draw_status.encoder_time = _tick_count;
+										draw_status.timeout_time = _tick_count;
+										draw_order.order_list.bit.watchdog = true;
+									}else{
+										draw_order.direction = DRAW_DIR_NONE;
+									}
+								}
+							}else{
+								if((draw_order.my_location < draw_order.order_location)
+									&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+									DrawerAccRatioProc();
+									draw_order.direction = DRAW_DIR_OPEN;
+									draw_order.order_list.bit.remote_order = true;
+									draw_status.status_list.bit.active = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else if((draw_order.my_location > draw_order.order_location)
+								&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+									DrawerAccRatioProc();
+									draw_order.order_list.bit.remote_order = true;
+									draw_order.direction = DRAW_DIR_CLOSE;
+									draw_status.status_list.bit.active = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else if((draw_order.my_location < draw_order.order_location)
+									&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+									DrawerAccRatioProc();
+									draw_order.direction = DRAW_DIR_CLOSE;
+									draw_order.order_list.bit.remote_order = true;
+									draw_status.status_list.bit.active = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else if((draw_order.my_location > draw_order.order_location)
+									&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+									DrawerAccRatioProc();
+									draw_order.direction = DRAW_DIR_OPEN;
+									draw_order.order_list.bit.remote_order = true;
+									draw_status.status_list.bit.active = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else{
+									send->payload[0] = 0x01;
+								}
+							}
+							break;
+						case DRAW_PARAM_OPEN:
+							draw_order.order_location = b;
+							send->payload[0] = 0x00;
+							draw_order.last_direction = draw_order.direction;
+							//SineAccelerationTable((DEFAULT_TABLE_SIZE * 2), ACC_FREQ_MIN, ACC_FREQ_MAX);
+							draw_status.status_list.bit.active = true;
+							draw_status.status_list.bit.manual_lock = true;
+							draw_order.order_list.bit.remote_order = true;
+							draw_order.last_direction = draw_order.direction;
+							draw_order.order_location = DRAW_PARAM_OPEN;
+							draw_order.direction = DRAW_DIR_OPEN;
+							draw_status.status_list.bit.manual = true;
+							pwm_status.pwm_list.bit.slow_section = false;
+							DrawerAccRatioProc();
+							draw_status.encoder_time = _tick_count;
+							draw_status.timeout_time = _tick_count;
+							draw_order.order_list.bit.watchdog = true;
+							draw_order.move_order = true;
+						break;
+						default:
+							send->payload[0] = 0x01;
+							break;
+					}
+				}else{
+					send->payload[0] = 0x01;
+				}
+			}
+		}else{
+			send->payload[0] = 0x01;
+		}
+	}
+
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Order Location : [%d]  My Location : [%d]\r\n",draw_order.order_location, draw_order.my_location);
+#endif
+#endif
+}
+
+void ReqLedOn(BOOL Rsp)
+{
+	main_uart_send *send = &_main_send;
+	main_uart_receive *receive = &_main_receive;
+
+	WORD wtemp;
+	BYTE bTemp;
+
+
+	send->payload[0] = 0x00;
+	send->packet_number++;
+
+	for(BYTE i=0; i<4; i++){
+		wtemp |= (receive->payload[i] << (i*2));		//Light On Color
+	}
+	//ARGB -> ABGR
+
+	wtemp = (WORD)((receive->payload[0]<<24) & 0xff000000);			//Alpha
+	wtemp |= (WORD)((receive->payload[1]) & 0xff);					//Red
+	wtemp |= (WORD)((receive->payload[2]<<8) & 0xff00);				//Green
+	wtemp |= (WORD)((receive->payload[3]<<16) & 0xff0000);			//Blue			//ABGR
+	Editor.L_rec_on_color=wtemp;
+
+	wtemp = false;
+
+	wtemp = (WORD)((receive->payload[4]<<24) & 0xff000000);			//Alpha
+	wtemp |= (WORD)((receive->payload[5]) & 0xff);					//Red
+	wtemp |= (WORD)((receive->payload[6]<<8) & 0xff00);				//Green
+	wtemp |= (WORD)((receive->payload[7]<<16) & 0xff0000);			//Blue			//ABGR
+	Editor.L_rec_off_color=wtemp;
+
+	wtemp = false;
+
+	bTemp = receive->payload[8];						//Blink Time (100ms * temp)
+	Editor.L_rec_toggle_time=bTemp;
+
+	wtemp = (WORD)((receive->payload[9]<<24) & 0xff000000);			//Alpha
+	wtemp |= (WORD)((receive->payload[10]) & 0xff);					//Red
+	wtemp |= (WORD)((receive->payload[11]<<8) & 0xff00);				//Green
+	wtemp |= (WORD)((receive->payload[12]<<16) & 0xff0000);			//Blue			//ABGR
+	Editor.R_rec_on_color=wtemp;
+
+	wtemp = false;
+
+	wtemp = (WORD)((receive->payload[13]<<24) & 0xff000000);			//Alpha
+	wtemp |= (WORD)((receive->payload[14]) & 0xff);					//Red
+	wtemp |= (WORD)((receive->payload[15]<<8) & 0xff00);				//Green
+	wtemp |= (WORD)((receive->payload[16]<<16) & 0xff0000);			//Blue			//ABGR
+	Editor.R_rec_off_color=wtemp;
+
+	bTemp = receive->payload[17];						//Blink Time (100ms * temp)
+	Editor.R_rec_toggle_time=bTemp;
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("[%6x][%6x][%d][%6x][%6x][%d]\r\n",Editor.L_rec_on_color,Editor.L_rec_off_color,Editor.L_rec_toggle_time,Editor.R_rec_on_color,Editor.R_rec_off_color,Editor.R_rec_toggle_time);
+#endif
+#endif
+	Editor.color_receive=true;
+
+	if(Rsp){
+		MakeTxPacket(1, send->payload);
+	}
+
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Led \r\n");
+#endif
+#endif
+}
+
+void ReqErrClr(void)
+{
+	main_uart_send *send = &_main_send;
+
+	draw_order.order_list.bit.watchdog = false;
+	draw_status.encoder_time = _tick_count;
+	draw_status.timeout_time = _tick_count;
+	draw_status.status_list.byte[1] = false;
+
+	send->payload[0] = 0x00;
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Error Clear!!\r\n");
+#endif
+#endif
+}
+
+void ReqDisplayDraw(void)
+{
+	main_uart_send *send = &_main_send;
+	main_uart_receive *receive = &_main_receive;
+	WORD temp;
+	BYTE b;
+
+	b = receive->payload[0];
+
+	switch(b){
+		case DISP_DRAW_DEFAULT:
+		case DISP_DRAW_REFILL:
+			draw_status.status_list.bit.manual_lock = false;
+			Display.step = b;
+			Display.last_time=_tick_count;
+
+			send->payload[0] = 0x00;
+			break;
+		case DISP_DRAW_LOCK:
+		case DISP_DRAW_DISPENSE:
+			draw_status.status_list.bit.manual_lock = true;
+			Display.step = b;
+			Display.last_time=_tick_count;
+
+			send->payload[0] = 0x00;
+			break;
+		default:
+			send->payload[0] = 0x01;
+			break;
+	}
+
+	draw_status.err_cst_count = (receive->length - 1) / 2;
+
+	for(BYTE i=0; i<draw_status.err_cst_count; i++){
+		temp = ((receive->payload[i+1] << 8) & 0xff00);
+		temp |= (receive->payload[i+2] & 0xff);
+		draw_status.err_cst_address[i] = temp;
+	}
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Draw Display : [%d]\r\n",b);
+#endif
+#endif
+
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+}
+
+void ReqManualLock(void)
+{
+	main_uart_send *send = &_main_send;
+	main_uart_receive *receive = &_main_receive;
+	BYTE lock_status;
+
+	lock_status = receive->payload[0];
+
+	if(lock_status){
+		draw_status.status_list.bit.manual_lock = true;
+		draw_status.status_list.bit.manual = false;
+	}else{
+		draw_status.status_list.bit.manual_lock = false;
+	}
+
+	send->payload[0] = 0x00;
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request ManualLock : [%d]!!\r\n", draw_status.status_list.bit.manual_lock);
+#endif
+#endif
+}
+
+void ReceiveFaultCstSlot(void)
+{
+	main_uart_send *send = &_main_send;
+	main_uart_receive *receive = &_main_receive;
+
+	BYTE b;
+
+	b = receive->payload[0];
+
+	switch(b){
+		case DRAW_PARAM_01:
+		case DRAW_PARAM_02:
+		case DRAW_PARAM_03:
+		case DRAW_PARAM_04:
+		case DRAW_PARAM_05:
+		case DRAW_PARAM_06:
+		case DRAW_PARAM_07:
+		case DRAW_PARAM_08:
+		case DRAW_PARAM_09:
+		case DRAW_PARAM_10:
+		case DRAW_PARAM_11:
+		case DRAW_PARAM_12:
+		case DRAW_PARAM_13:
+		case DRAW_PARAM_14:
+		case DRAW_PARAM_15:
+		case DRAW_PARAM_16:
+		case DRAW_PARAM_17:
+		case DRAW_PARAM_18:
+		case DRAW_PARAM_19:
+		case DRAW_PARAM_20:
+		case DRAW_PARAM_OPEN:
+			draw_status.status_list.bit.encoder_error = false;
+			draw_status.status_list.bit.timeout = false;
+
+			draw_order.fault_location = b;
+			draw_order.order_list.bit.fault_reserve = true;
+			send->payload[0] = 0x00;
+			break;
+		default:
+			send->payload[0] = 0x01;
+			break;
+	}
+#ifdef DEBUG
+#ifdef DEBUG_UART
+	printf("Request Fault Cst Location : [%d]!!\r\n", draw_order.fault_location);
+#endif
+#endif
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+}
+
+void ReqMoveFaultCstSlot(void)
+{
+	main_uart_send *send = &_main_send;
+
+	if(draw_order.order_list.bit.auth_access_token == true){
+		send->payload[0] = 0x02;
+	}else{
+		if(draw_order.order_list.bit.fault_reserve == true){
+			draw_order.order_list.bit.fault_reserve = false;
+			draw_order.order_list.bit.fault_handling = true;
+
+			if(draw_order.fault_location > draw_encoder.draw_final_param)		draw_order.fault_location = DRAW_PARAM_OPEN;		//exception
+
+			switch(draw_order.fault_location){
+					case DRAW_PARAM_01:
+					case DRAW_PARAM_02:
+					case DRAW_PARAM_03:
+					case DRAW_PARAM_04:
+					case DRAW_PARAM_05:
+					case DRAW_PARAM_06:
+					case DRAW_PARAM_07:
+					case DRAW_PARAM_08:
+					case DRAW_PARAM_09:
+					case DRAW_PARAM_10:
+					case DRAW_PARAM_11:
+					case DRAW_PARAM_12:
+					case DRAW_PARAM_13:
+					case DRAW_PARAM_14:
+					case DRAW_PARAM_15:
+					case DRAW_PARAM_16:
+					case DRAW_PARAM_17:
+					case DRAW_PARAM_18:
+					case DRAW_PARAM_19:
+					case DRAW_PARAM_20:
+					case DRAW_PARAM_CLOSE:
+						draw_order.order_location = draw_order.fault_location;
+						send->payload[0] = 0x00;
+
+						draw_order.last_direction = draw_order.direction;
+
+						if(draw_order.my_location == draw_order.order_location){
+							if((draw_order.order_location != DRAW_PARAM_CLOSE) && (draw_order.order_location != DRAW_PARAM_OPEN)){
+								if(draw_encoder.draw_my_encoder > (draw_encoder.draw_enc_point[draw_order.order_location] + MINIMUM_INTERVAL)){
+									if(draw_order.order_location < DRAW_PARAM_OPEN)		draw_order.my_location++;
+									draw_order.direction = DRAW_DIR_CLOSE;
+									draw_status.status_list.bit.active = true;
+									draw_order.order_list.bit.remote_order = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else if(draw_encoder.draw_my_encoder < (draw_encoder.draw_enc_point[draw_order.my_location] - MINIMUM_INTERVAL)){
+									if(draw_order.order_location > DRAW_PARAM_CLOSE)			draw_order.my_location--;
+									draw_order.direction = DRAW_DIR_OPEN;
+									draw_status.status_list.bit.active = true;
+									draw_order.order_list.bit.remote_order = true;
+									draw_status.status_list.bit.manual_lock = true;
+									draw_order.move_order = true;
+									draw_status.encoder_time = _tick_count;
+									draw_status.timeout_time = _tick_count;
+									draw_order.order_list.bit.watchdog = true;
+								}else{
+									draw_order.direction = DRAW_DIR_NONE;
+								}
+							}
+						}else{
+							if((draw_order.my_location < draw_order.order_location)
+								&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+								DrawerAccRatioProc();
+								draw_order.direction = DRAW_DIR_OPEN;
+								draw_order.order_list.bit.remote_order = true;
+								draw_status.status_list.bit.active = true;
+								draw_status.status_list.bit.manual_lock = true;
+								draw_order.move_order = true;
+								draw_status.encoder_time = _tick_count;
+								draw_status.timeout_time = _tick_count;
+								draw_order.order_list.bit.watchdog = true;
+							}else if((draw_order.my_location > draw_order.order_location)
+							&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+								DrawerAccRatioProc();
+								draw_order.order_list.bit.remote_order = true;
+								draw_order.direction = DRAW_DIR_CLOSE;
+								draw_status.status_list.bit.active = true;
+								draw_status.status_list.bit.manual_lock = true;
+								draw_order.move_order = true;
+								draw_status.encoder_time = _tick_count;
+								draw_status.timeout_time = _tick_count;
+								draw_order.order_list.bit.watchdog = true;
+							}else if((draw_order.my_location < draw_order.order_location)
+								&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+								DrawerAccRatioProc();
+								draw_order.direction = DRAW_DIR_CLOSE;
+								draw_order.order_list.bit.remote_order = true;
+								draw_status.status_list.bit.active = true;
+								draw_status.status_list.bit.manual_lock = true;
+								draw_order.move_order = true;
+								draw_status.encoder_time = _tick_count;
+								draw_status.timeout_time = _tick_count;
+								draw_order.order_list.bit.watchdog = true;
+							}else if((draw_order.my_location > draw_order.order_location)
+								&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+								DrawerAccRatioProc();
+								draw_order.direction = DRAW_DIR_OPEN;
+								draw_order.order_list.bit.remote_order = true;
+								draw_status.status_list.bit.active = true;
+								draw_status.status_list.bit.manual_lock = true;
+								draw_order.move_order = true;
+								draw_status.encoder_time = _tick_count;
+								draw_status.timeout_time = _tick_count;
+								draw_order.order_list.bit.watchdog = true;
+							}else{
+								send->payload[0] = 0x01;
+							}
+						}
+						break;
+					case DRAW_PARAM_OPEN:
+	 					send->payload[0] = 0x00;
+						draw_order.last_direction = draw_order.direction;
+						draw_status.status_list.bit.active = true;
+						draw_status.status_list.bit.manual_lock = true;
+						draw_order.order_list.bit.remote_order = true;
+						draw_order.last_direction = draw_order.direction;
+						draw_order.order_location = DRAW_PARAM_OPEN;
+						draw_order.direction = DRAW_DIR_OPEN;
+						draw_status.status_list.bit.manual = true;
+						pwm_status.pwm_list.bit.slow_section = false;
+						DrawerAccRatioProc();
+						draw_status.encoder_time = _tick_count;
+						draw_status.timeout_time = _tick_count;
+						draw_order.order_list.bit.watchdog = true;
+						draw_order.move_order = true;
+					break;
+					default:
+						send->payload[0] = 0x01;
+						break;
+				}
+		}else{
+			send->payload[0] = 0x01;
+		}
+	}
+
+	send->packet_number++;
+	MakeTxPacket(1, send->payload);
+}
+
+void FwUpdate_Writeflag(void){
+	unsigned char fw_flag = _FW_UPDATE_KEY;
+	EEP_SPI_WriteData(_BOOT_CHECK_ADDRESS,fw_flag);
+}
+void FW_Update_Proc(void){
+	main_uart_send *send = &_main_send;
+
+	send->payload[0]=0;
+	MakeTxPacket(1,send->payload);
+
+	FwUpdate_Writeflag();
+	Delay_Ms(10);
+	NVIC_SetVectorTable(NVIC_VectTab_FLASH,0x0000);
+	NVIC_SystemReset();
+}
+
+void RecvPcProc(void)
+{
+	main_uart_receive *receive = &_main_receive;
+
+	if(RecvPcPacket() == _TRUE){
+		if(my_address.W == receive->address.W){
+			switch(receive->command){
+				case REQ_VER:
+					ReqVer();
+					break;
+				case REQ_STATUS:
+					ReqStatus();
+					break;
+				case RECV_OK:
+					RecvOk();
+					break;
+				case REQ_INIT:
+					ReqInit();
+					break;
+				case REQ_MOVE:
+					ReqMove();
+					break;
+				case REQ_LOCK:
+					ReqManualLock();
+					break;
+				case _CST_CMD_FWUPDATA_START:
+					FW_Update_Proc();
+					break;
+				case RECV_FAULT_CST:
+					ReceiveFaultCstSlot();
+					break;
+				case REQ_MOVE_FAULT_CST:
+					ReqMoveFaultCstSlot();
+					break;
+				case REQ_ERR_CLR:
+					ReqErrClr();
+					break;
+				case REQ_DISPLAY_DRAW:
+					ReqDisplayDraw();
+					break;
+			}
+		}
+	}
+}
+
+

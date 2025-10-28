@@ -1,0 +1,222 @@
+/**
+  ******************************************************************************
+  * @vendor		CRETEM
+  * @project	Automatic_Drawer
+  * @file    	main.c
+  * @author  	Firmware Team(Nexus)
+  ******************************************************************************/
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+#define IS_TOUCH_RESET() ((GPIOI->IDR & GPIO_Pin_7) == RESET)
+/* Private variables ---------------------------------------------------------*/
+
+uint8_t GUI_Initialized   = 0;
+/* Private functions ---------------------------------------------------------*/
+
+
+void MCU_Configuration(void){
+	SysTimer_Configuration();
+
+	GPIO1_Configuration();
+	GPIO2_Configuration();
+
+  	Usart_Configuration();
+
+	Timer_Configuration();
+
+  	TSC_Configuration();
+
+  	SDRAM_Configuration();
+
+  	/* Enable the CRC Module */
+  	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_CRC, ENABLE);
+
+	//setCalibrationMatrix( &_display_sample[0],&_screen_sample[0],&_matrix );
+}
+
+void Init_variables_before(void){
+
+	Display.layer=1;
+	Display.set=FALSE;
+	Display.step=DISPLAY_INTRO;
+	Display.pre_step=0xff;
+	Display.init=FALSE;
+	Display.status=DRAWER_STATUS_STOP;
+	Display.cal_cnt=0;
+	Display.recalibration=FALSE;
+	Display.retry=FALSE;
+	Display.status_toggle=0;
+	Display.set_speed=SET_IDLE;
+
+	memset(Display.Text_arr,0x00,sizeof(BYTE)*6);		//2018.11.12   seo
+	memset(Display.Text_Encoder_arr,0x00,sizeof(BYTE)*6);		//2018.11.12   seo
+
+	memset(Display.close_touch,0x00,sizeof(BYTE)*2);
+	memset(Display.open_touch,0x00,sizeof(BYTE)*2);
+
+	_main_send.transmit_line_ready = _TRUE;
+
+	_main_send.packet_number=0;
+
+	_main_receive.put_index=0;
+	_main_receive.get_index=0;
+
+	_main_receive.packet_number=0;
+
+	_debug_send.transmit_line_ready=_TRUE;
+
+	_debug_send.put_index=0;
+	_debug_send.get_index=0;
+}
+
+void Init_variables_after(void){
+	int xSize, ySize;
+
+	xSize = LCD_GetXSize();
+	ySize = LCD_GetYSize();
+
+	GUI_Initialized=1;
+	//
+	// Calculate reference points depending on LCD size
+	//
+	_new_display_sample[0].x = (xSize * 5) / 100;
+	_new_display_sample[0].y = (ySize * 5) / 100;
+
+	_new_display_sample[1].x = xSize / 2;
+	_new_display_sample[1].y = (ySize * 5) / 100;
+
+	_new_display_sample[2].x = xSize - ((xSize * 5) / 100);
+	_new_display_sample[2].y = (ySize * 5) / 100;
+
+	_new_display_sample[3].x = (xSize * 5) / 100;
+	_new_display_sample[3].y = ySize / 2;
+
+	_new_display_sample[4].x = xSize / 2;
+	_new_display_sample[4].y = ySize / 2;
+
+	_new_display_sample[5].x = xSize - ((xSize * 5) / 100);
+	_new_display_sample[5].y = ySize / 2;
+
+	_new_display_sample[6].x = (xSize * 5) / 100;
+	_new_display_sample[6].y = ySize - ((ySize * 5) / 100);
+
+	_new_display_sample[7].x = xSize / 2;
+	_new_display_sample[7].y = ySize - ((ySize * 5) / 100);
+
+	_new_display_sample[8].x = xSize - ((xSize * 5) / 100);
+	_new_display_sample[8].y = ySize - ((ySize * 5) / 100);
+}
+
+void DummyReturn(void)
+{
+}
+
+void (*STEP10MSFunction[])(void) = {
+	WatchDog,				// 0
+	DisplayChanges,			// 1
+	Touch_Drag_Proc,		// 2
+	DummyReturn,				// 3
+	Toggle_RUNLED,			// 4
+	DummyReturn,			// 5
+	Display_Sensor_InOut,	// 6`
+	DummyReturn,			// 7
+	Enter_Setting_Mode,		// 8
+	DummyReturn,			// 9
+};
+
+void (*STEP1MSFunction[])(void) = {
+	DummyReturn,			// 0
+	LCD_Display_Switch,		// 1
+	DummyReturn,			// 2
+	DrawerWatchDog,			// 3
+	DummyReturn,			// 4
+	SensorInputProc,		// 5
+	DummyReturn,			// 6
+	DrawerLoopTest,			// 7
+	DummyReturn,			// 8
+	TimeService10ms,		// 9
+};
+
+void TimeService10ms(void)
+{
+	static BYTE STEP_10MS = 0;
+	STEP_10MS = (STEP_10MS + 1) % 10;
+	(*STEP10MSFunction[STEP_10MS])();
+}
+
+void TimeService1ms(void)
+{
+	static BYTE STEP_1MS = 0;
+
+	STEP_1MS = (STEP_1MS + 1) % 10;
+	(*STEP1MSFunction[STEP_1MS])();
+}
+
+
+#define IO_BUF_SIZE		(255)
+
+int main(void){
+	//const unsigned char CompileDateTime[] = __DATE__" "__TIME__;
+
+  	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0);
+
+  	MCU_Configuration();
+
+	Delay_Ms(300);
+
+  	/* Activate the use of memory device feature */
+  	WM_SetCreateFlags(WM_CF_MEMDEV);
+
+	ReadMyAddr(acc_freq_array);
+
+	Init_variables_before();
+
+  	GUI_Init();
+
+	if(IS_TOUCH_RESET()){
+		//Calibration_Enter_Reset_Write();
+		Calibration_Enter_Write();
+	}
+	
+	
+	if(Calibration_Enter_Read() != EEP_TOUCH_CALIBRATION_MAGIC_CODE){
+		TouchPanel_Low_Calibrate();
+	}
+	Low_Calibration_Val_Read();
+
+	LCD_Draw_Init();
+
+	Init_variables_after();
+	GetEncPoint();
+
+	Iwdg_Configuration();
+#ifdef DEBUG
+	//printf("----- Starting ADU V2 TEST MCU PROGRAM [%s]-----\r\n", CompileDateTime);
+	printf(" %s \n\r",CHECKVERSION);
+	printf("ADDR : [%x]\r\n",my_address.W);
+	printf("Freq : [%d] Slow Freq : [%d]\r\n", acc_freq_array[ACC_MIN],acc_freq_array[ACC_SLOW_MIN]);
+#endif
+	DrawStatusUpdate();
+
+	while (1) {
+		RecvPcProc();
+		Main_Send_Process();
+		Debug_Send_Process();
+		DrawerOperationProc();
+		ButtonTouchProc();
+		Display_Encoder();			//2018.11.08	seo
+		MyLocation();
+
+		if(g_bTimerSync100us){
+			g_bTimerSync100us = false;
+			Touch_Process();
+			Released_key_Retry();
+			TimeService1ms();
+		}
+		GUI_Exec();
+	}
+}
+

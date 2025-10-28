@@ -1,0 +1,103 @@
+/**
+  ******************************************************************************
+  * @vendor		CRETEM
+  * @project	Automatic_Drawer
+  * @file		GPIO.H
+  * @author  	Firmware Team(Nexus)
+  ******************************************************************************/
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __GPIO_H__
+#define __GPIO_H__
+
+#ifdef __cplusplus
+ extern "C" {
+#endif
+
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+/* Exported types ------------------------------------------------------------*/
+/* Exported constants --------------------------------------------------------*/
+/* Exported define -----------------------------------------------------------*/
+#define USER_KEY_Port						GPIOF
+#define USER_KEY_Pin						GPIO_Pin_10
+#define USER_KEY_RCC_AHBPeriph				RCC_AHB1Periph_GPIOF
+/****************************************************************/
+#define WAKEUP_KEY_Port					    GPIOA
+#define WAKEUP_KEY_Pin					    GPIO_Pin_0
+#define WAKEUP_KEY_RCC_AHBPeriph			RCC_AHB1Periph_GPIOA
+/****************************************************************/
+#define JOY_A_KEY_Port					    GPIOG
+#define JOY_A_KEY_Pin					   	GPIO_Pin_2
+#define JOY_A_KEY_RCC_AHBPeriph				RCC_AHB1Periph_GPIOG
+
+#define JOY_B_KEY_Port					    GPIOG
+#define JOY_B_KEY_Pin					    GPIO_Pin_3
+#define JOY_B_KEY_RCC_AHBPeriph				RCC_AHB1Periph_GPIOG
+
+#define JOY_C_KEY_Port					    GPIOG
+#define JOY_C_KEY_Pin				        GPIO_Pin_9
+#define JOY_C_KEY_RCC_AHBPeriph				RCC_AHB1Periph_GPIOG
+
+#define JOY_D_KEY_Port					    GPIOG
+#define JOY_D_KEY_Pin					  	GPIO_Pin_10
+#define JOY_D_KEY_RCC_AHBPeriph				RCC_AHB1Periph_GPIOG
+
+#define JOY_CTR_KEY_Port				    GPIOD
+#define JOY_CTR_KEY_Pin					    GPIO_Pin_13
+#define JOY_CTR_KEY_RCC_AHBPeriph			RCC_AHB1Periph_GPIOD
+/****************************************************************/
+#define LED1_Port						  	GPIOF
+#define LED1_Pin						  	GPIO_Pin_6
+#define LED1_RCC_AHBPeriph				  	RCC_AHB1Periph_GPIOF
+
+#define LED2_Port						  	GPIOF
+#define LED2_Pin						  	GPIO_Pin_7
+#define LED2_RCC_AHBPeriph				  	RCC_AHB1Periph_GPIOF
+
+#define LED3_Port						  	GPIOF
+#define LED3_Pin						  	GPIO_Pin_8
+#define LED3_RCC_AHBPeriph				  	RCC_AHB1Periph_GPIOF
+
+#define LED4_Port						  	GPIOF
+#define LED4_Pin						  	GPIO_Pin_9
+#define LED4_RCC_AHBPeriph				  	RCC_AHB1Periph_GPIOF
+
+
+//PORTA
+#define A_OUT_USART_RTS						GPIO_Pin_8
+
+//PORTB
+
+//PORTC
+
+//PORTD
+#define D_OUT_LCD_BACKLIGHT					GPIO_Pin_12
+
+//PORTF
+
+//PORTH
+
+//PORTI
+#define I_OUT_RUNLED						GPIO_Pin_8
+
+/* Exported macro ------------------------------------------------------------*/
+
+
+#define BACK_LIGHT_ON()		GPIO_SetBits(GPIOD,D_OUT_LCD_BACKLIGHT)
+#define BACK_LIGHT_OFF()	GPIO_ResetBits(GPIOD,D_OUT_LCD_BACKLIGHT)
+
+
+#define TOOGLE_RUNLED()		GPIO_ToggleBits(GPIOI, I_OUT_RUNLED)
+
+#define TX_ENABLE()			GPIO_SetBits(GPIOA,A_OUT_USART_RTS)
+#define TX_DISABLE()		GPIO_ResetBits(GPIOA,A_OUT_USART_RTS)
+/* Exported functions ------------------------------------------------------- */
+extern void GPIO_Configuration(void);
+extern void Toggle_RUNLED(void);
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __GPIO_H__ */
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+

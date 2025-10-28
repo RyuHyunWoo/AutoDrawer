@@ -1,0 +1,1807 @@
+/**
+  ******************************************************************************
+  * @vendor		CRETEM
+  * @project	Automatic_Drawer
+  * @file    	motor.c
+  * @author  	Firmware Team(Nexus)
+  ******************************************************************************/
+
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+
+GPIO_TypeDef* SLOT_SET_GPIO_PORT[SLOTn] = {SLOT1_GPIO_PORT, SLOT234_GPIO_PORT, SLOT234_GPIO_PORT, SLOT234_GPIO_PORT};
+const uint16_t SLOT_SET_GPIO_PIN[SLOTn] = {SLOT1_GPIO_PIN, SLOT2_GPIO_PIN,SLOT3_GPIO_PIN,SLOT4_GPIO_PIN};
+const uint32_t SLOT_SET_GPIO_CLK[SLOTn] = {SLOT1_GPIO_CLK, SLOT234_GPIO_CLK,SLOT234_GPIO_CLK,SLOT234_GPIO_CLK};
+
+GPIO_TypeDef* MOTOR_SET_GPIO_PORT[MOTORn] = {MOTOR_DIR_GPIO_PORT, MOTOR_RUN_GPIO_PORT};
+const uint16_t MOTOR_SET_GPIO_PIN[MOTORn] = {MOTOR_DIR_GPIO_PIN, MOTOR_RUN_GPIO_PIN};
+const uint32_t MOTOR_SET_GPIO_CLK[MOTORn] = {MOTOR_DIR_GPIO_CLK, MOTOR_RUN_GPIO_CLK};
+
+GPIO_TypeDef* SENSOR_SET_GPIO_PORT[SENSORn] = {SENSOR1_GPIO_PORT, SENSOR2_GPIO_PORT, SENSOR3_GPIO_PORT, SENSOR4_GPIO_PORT, SENSOR5_GPIO_PORT, ACCESS_TOKEN1_GPIO_PORT, ACCESS_TOKEN2_GPIO_PORT};
+const uint16_t SENSOR_SET_GPIO_PIN[SENSORn] = {SENSOR1_GPIO_PIN, SENSOR2_GPIO_PIN, SENSOR3_GPIO_PIN, SENSOR4_GPIO_PIN, SENSOR5_GPIO_PIN, ACCESS_TOKEN1_GPIO_PIN, ACCESS_TOKEN2_GPIO_PIN};
+const uint32_t SENSOR_SET_GPIO_CLK[SENSORn] = {SENSOR1_GPIO_CLK, SENSOR2_GPIO_CLK, SENSOR3_GPIO_CLK, SENSOR4_GPIO_CLK, SENSOR5_GPIO_CLK, ACCESS_TOKEN1_GPIO_CLK, ACCESS_TOKEN2_GPIO_CLK};
+
+const uint8_t SENSOR_SET_EXTI_SOURCE[SENSORn] = {SENSOR1_EXTI_SOURCE,SENSOR2_EXTI_SOURCE,SENSOR3_EXTI_SOURCE,SENSOR4_EXTI_SOURCE,SENSOR5_EXTI_SOURCE,ACCESS_TOKEN1_EXTI_SOURCE, ACCESS_TOKEN2_EXTI_SOURCE};
+const uint8_t SENSOR_SET_EXTI_PORT[SENSORn] = {SENSOR1_EXTI_PORT,SENSOR2_EXTI_PORT,SENSOR3_EXTI_PORT,SENSOR4_EXTI_PORT,SENSOR5_EXTI_PORT,ACCESS_TOKEN1_EXTI_PORT, ACCESS_TOKEN2_EXTI_PORT};
+const uint32_t SENSOR_SET_EXTI_LINE[SENSORn] = {SENSOR1_EXTI_LINE,SENSOR2_EXTI_LINE,SENSOR3_EXTI_LINE,SENSOR4_EXTI_LINE,SENSOR5_EXTI_LINE,ACCESS_TOKEN1_EXTI_LINE, ACCESS_TOKEN2_EXTI_LINE};
+const uint8_t SENSOR_SET_EXTI_IRQ[SENSORn] = {EXTI2_IRQn,EXTI3_IRQn,EXTI9_5_IRQn,EXTI9_5_IRQn,EXTI0_IRQn,EXTI1_IRQn,EXTI2_IRQn};
+
+const uint8_t SENSOR_SET_PREEMPTION_PRIORITY[SENSORn] = {NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0,NVIC_PREEMPTION_PRIORITY_0};
+const uint8_t SENSOR_SET_SUB_PRIORITY[SENSORn] = {NVIC_SUB_PRIORITY_7,NVIC_SUB_PRIORITY_8,NVIC_SUB_PRIORITY_9,NVIC_SUB_PRIORITY_10,NVIC_SUB_PRIORITY_11,NVIC_SUB_PRIORITY_0};//NVIC_SUB_PRIORITY_12};
+
+WORD acc_freq_array[FREQn];
+
+/* Private variables ---------------------------------------------------------*/
+device_address my_address;
+status_module draw_status;
+draw_order_module draw_order;
+GET_ENC_POINT draw_encoder;
+pwm_typedef pwm_status;
+
+WORD sine_acc_32[SINE_ARRAY_LENGTH] = {0,};
+WORD Sealinglength = 0;
+volatile WORD SealingStartTime = 0;
+float sine_acc[SINE_ARRAY_LENGTH] = {0,};
+WORD sine_acc_word[SINE_ARRAY_LENGTH] = {0,};
+
+/* Private functions ---------------------------------------------------------*/
+
+void Motor_Configuration(MOTOR_TypeDef Motor)
+{
+	GPIO_InitTypeDef  GPIO_InitStructure;
+
+	/* Enable the GPIO_LED Clock */
+	RCC_AHB1PeriphClockCmd(MOTOR_SET_GPIO_CLK[Motor], ENABLE);
+
+	/* Configure the GPIO_LED pin */
+	GPIO_InitStructure.GPIO_Pin = MOTOR_SET_GPIO_PIN[Motor];
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(MOTOR_SET_GPIO_PORT[Motor], &GPIO_InitStructure);
+}
+
+void Sensor_Configuration(BYTE Sensor)
+{
+	GPIO_InitTypeDef  GPIO_InitStructure;
+	EXTI_InitTypeDef EXTI_InitStructure;
+
+	/* Enable the GPIO_LED Clock */
+	RCC_AHB1PeriphClockCmd(SENSOR_SET_GPIO_CLK[Sensor], ENABLE);
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
+
+	switch(Sensor){
+		case SENSOR_PHASE_A:
+		case SENSOR_PHASE_B:
+		case SENSOR_OPEN:
+		case SENSOR_CLOSE:
+		case SENSOR_ORIGIN:
+			/* Configure the GPIO_LED pin */
+			GPIO_InitStructure.GPIO_Pin = SENSOR_SET_GPIO_PIN[Sensor];
+			GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+			GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+			GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+			GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+			GPIO_Init(SENSOR_SET_GPIO_PORT[Sensor], &GPIO_InitStructure);
+			break;
+		case ACCESS_TOKEN1:
+			/* Configure the GPIO_LED pin */
+			GPIO_InitStructure.GPIO_Pin = SENSOR_SET_GPIO_PIN[Sensor];
+			GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+			GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+			GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_DOWN;
+			GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+			GPIO_Init(SENSOR_SET_GPIO_PORT[Sensor], &GPIO_InitStructure);
+			break;
+		case ACCESS_TOKEN2:
+			/* Configure the GPIO_LED pin */
+			GPIO_InitStructure.GPIO_Pin = SENSOR_SET_GPIO_PIN[Sensor];
+			GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+			GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+			GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+			GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+			GPIO_Init(SENSOR_SET_GPIO_PORT[Sensor], &GPIO_InitStructure);
+			break;
+	}
+
+	switch(Sensor){									//2019-10-25 -LMI-
+		case ACCESS_TOKEN1:
+		case SENSOR_PHASE_A:
+		case SENSOR_PHASE_B:
+			SYSCFG_EXTILineConfig(SENSOR_SET_EXTI_PORT[Sensor],SENSOR_SET_EXTI_SOURCE[Sensor]);
+			EXTI_InitStructure.EXTI_Line = SENSOR_SET_EXTI_LINE[Sensor];
+			EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
+			EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
+			EXTI_InitStructure.EXTI_LineCmd = ENABLE;
+			EXTI_Init(&EXTI_InitStructure);
+
+			EXTI_Sensor_Enable(Sensor);
+			break;
+	}
+}
+
+void EXTI_Sensor_Enable(BYTE Sensor){
+	NVIC_InitTypeDef NVIC_InitStructure;
+
+	EXTI_ClearITPendingBit(SENSOR_SET_EXTI_LINE[Sensor]);
+
+    NVIC_InitStructure.NVIC_IRQChannel = SENSOR_SET_EXTI_IRQ[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = SENSOR_SET_PREEMPTION_PRIORITY[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = SENSOR_SET_SUB_PRIORITY[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  	NVIC_Init(&NVIC_InitStructure);
+}
+
+void EXTI_Sensor_Disable(BYTE Sensor){
+	NVIC_InitTypeDef NVIC_InitStructure;
+
+	EXTI_ClearITPendingBit(SENSOR_SET_EXTI_IRQ[Sensor]);
+
+    NVIC_InitStructure.NVIC_IRQChannel = SENSOR_SET_EXTI_IRQ[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = SENSOR_SET_PREEMPTION_PRIORITY[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelSubPriority = SENSOR_SET_SUB_PRIORITY[Sensor];
+  	NVIC_InitStructure.NVIC_IRQChannelCmd = DISABLE;
+  	NVIC_Init(&NVIC_InitStructure);
+}
+
+void Addr_Configuration(void)
+{
+	GPIO_InitTypeDef  GPIO_InitStructure;
+
+	/* Enable the GPIO_LED Clock */
+	RCC_AHB1PeriphClockCmd(ADDR_GPIO_CLK, ENABLE);
+
+	/* Configure the GPIO_LED pin */
+	GPIO_InitStructure.GPIO_Pin = ADDR1_GPIO_PIN | ADDR2_GPIO_PIN | ADDR3_GPIO_PIN | ADDR4_GPIO_PIN;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(ADDR_GPIO_PORT, &GPIO_InitStructure);
+}
+
+void Slot_Configuration(BYTE Slot)
+{
+	GPIO_InitTypeDef  GPIO_InitStructure;
+
+	/* Enable the GPIO_LED Clock */
+	RCC_AHB1PeriphClockCmd(SLOT_SET_GPIO_CLK[Slot], ENABLE);
+
+	/* Configure the GPIO_LED pin */
+	GPIO_InitStructure.GPIO_Pin = SLOT_SET_GPIO_PIN[Slot];
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(SLOT_SET_GPIO_PORT[Slot], &GPIO_InitStructure);
+}
+
+void EEP_Configuration(void)								//LMI
+{
+	GPIO_InitTypeDef GPIO_InitStructure;
+	SPI_InitTypeDef SPI_InitStructure;
+
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
+	RCC_AHB1PeriphClockCmd(GPIOA_SPI1_CLK, ENABLE);
+	RCC_AHB1PeriphClockCmd(GPIOC_SPI1_CLK, ENABLE);
+
+	GPIO_InitStructure.GPIO_Pin = GPIOA_SPI1_EEP_MOSI | GPIOA_SPI1_EEP_SCK;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+
+	GPIO_Init(GPIOA_SPI1_PORT, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Pin = GPIOA_SPI1_EEP_MISO;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+
+	GPIO_Init(GPIOA_SPI1_PORT, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Pin = GPIOA_SPI1_EEP_NSS;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_Init(GPIOA_SPI1_PORT, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Pin = GPIOC_SPI1_EEP_WE | GPIOC_SPI1_EEP_RESET;
+  	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_Init(GPIOC_SPI1_PORT, &GPIO_InitStructure);
+
+	SPI_DeInit(SPI1);
+
+	GPIO_PinAFConfig(GPIOA_SPI1_PORT,GPIO_PinSource5,GPIO_AF_SPI1);
+	GPIO_PinAFConfig(GPIOA_SPI1_PORT,GPIO_PinSource6,GPIO_AF_SPI1);
+	GPIO_PinAFConfig(GPIOA_SPI1_PORT,GPIO_PinSource7,GPIO_AF_SPI1);
+
+	SPI_InitStructure.SPI_Direction = SPI_Direction_2Lines_FullDuplex;
+	SPI_InitStructure.SPI_DataSize = SPI_DataSize_8b;
+	SPI_InitStructure.SPI_CPOL = SPI_CPOL_Low;
+	SPI_InitStructure.SPI_CPHA = SPI_CPHA_1Edge;
+	SPI_InitStructure.SPI_NSS = SPI_NSS_Soft;
+	SPI_InitStructure.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_8;
+	SPI_InitStructure.SPI_FirstBit = SPI_FirstBit_MSB;
+	SPI_InitStructure.SPI_CRCPolynomial = 7;
+	SPI_InitStructure.SPI_Mode = SPI_Mode_Master;
+
+	SPI_Init(SPI1, &SPI_InitStructure);
+
+	SPI_Cmd(SPI1, ENABLE);
+
+	SPI1_CS_DISABLE();
+	GPIO_SetBits(GPIOC_SPI1_PORT, GPIOC_SPI1_EEP_RESET);
+	//SPI1_WE_ENABLE();
+	SPI1_WE_DISABLE();
+}
+
+inline void EEP_WriteEnable(void) {							//LMI
+    SPI1_CS_ENABLE();
+
+    BYTE command[1] = {_EEPROM_WREN};
+    EEP_SPI_SendInstruction((BYTE*)command, 1);
+
+    SPI1_CS_DISABLE();
+}
+
+/**
+  * @brief  Disables the write access to the EEPROM.
+  * @param  None
+  * @retval None
+  */
+inline void EEP_WriteDisable(void) {
+	SPI1_CS_ENABLE();
+
+    BYTE command[1] = {_EEPROM_WRDI};
+    EEP_SPI_SendInstruction((BYTE*)command, 1);
+
+    SPI1_CS_DISABLE();
+}
+
+inline void EEP_SPI_SendInstruction(BYTE *pData, BYTE size)
+{
+	BYTE DataIndex;
+	BYTE Data;
+	DataIndex = size;
+	USHORT timeout;
+
+	while(DataIndex > 0){
+		/* Loop while DR register in not emplty */
+		while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+		/* Send byte through the SPI1 peripheral */
+		Data = *(BYTE*)pData++;
+		SPI_I2S_SendData(SPI1, (uint16_t)Data);
+
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+		SPI_I2S_ReceiveData(SPI1);
+		DataIndex--;
+	};
+}
+
+void EEP_WriteStatusRegister(BYTE regval)
+{
+	USHORT timeout;
+
+ 	EEP_WriteEnable();
+    SPI1_CS_ENABLE();
+
+	//while(SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_TXE) == RESET);
+	while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+	SPI_I2S_SendData(SPI1, (uint16_t)_EEPROM_RDSR);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	SPI_I2S_ReceiveData(SPI1);
+	while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+	SPI_I2S_SendData(SPI1, 0x00);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	SPI_I2S_ReceiveData(SPI1);
+
+    SPI1_CS_DISABLE();
+	EEP_WriteDisable();
+}
+
+BYTE EEP_SPI_WaitStandbyState(void) {
+	SHORT status;
+	USHORT timeout;
+
+    SPI1_CS_ENABLE();
+
+    while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+	SPI_I2S_SendData(SPI1, (uint16_t)_EEPROM_RDSR);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	status = SPI_I2S_ReceiveData(SPI1);
+
+	while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+	SPI_I2S_SendData(SPI1, 0x00);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	status = SPI_I2S_ReceiveData(SPI1);
+
+    SPI1_CS_DISABLE();
+
+	return status;
+}
+
+void EEP_SPI_WritePage(BYTE* pData, SHORT WriteAddr, SHORT NumByteToWrite)
+{
+    BYTE header[4];
+	SHORT _Data;
+	BYTE DataIndex;
+	USHORT timeout;
+
+    header[0] = _EEPROM_WRITE;
+	header[1] = ((WriteAddr >> 16) & 0x01);
+    header[2] = ((WriteAddr >> 8) & 0xff);
+    header[3] = (WriteAddr & 0xff);
+
+	EEP_WriteEnable();
+	NOP_2;
+	SPI1_CS_ENABLE();
+
+    EEP_SPI_SendInstruction(header, 4);
+
+	DataIndex = NumByteToWrite;
+
+    while(DataIndex > 0){
+		/* Loop while DR register in not emplty */
+		while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+		/* Send byte through the SPI1 peripheral */
+		_Data = *(BYTE*)pData++;
+		SPI_I2S_SendData(SPI1, (uint16_t)_Data);
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+		SPI_I2S_ReceiveData(SPI1);
+		DataIndex--;
+	}
+    SPI1_CS_DISABLE();
+	NOP_2;
+	EEP_WriteDisable();
+}
+
+void EEP_SPI_WriteBuffer(BYTE* pData, SHORT WriteAddr, SHORT NumByteToWrite)
+{
+    SHORT _NumOfPage = 0, _NumOfSingle = 0, _Addr = 0, _count = 0, _temp = 0;
+    SHORT _EEP_DataNum = 0;
+
+    _Addr = WriteAddr % _EEPROM_PAGESIZE;
+    _count = _EEPROM_PAGESIZE - _Addr;
+    _NumOfPage =  NumByteToWrite / _EEPROM_PAGESIZE;
+    _NumOfSingle = NumByteToWrite % _EEPROM_PAGESIZE;
+
+	if(_Addr == 0){
+        if (_NumOfPage == 0){ /* NumByteToWrite < EEPROM_PAGESIZE */
+            _EEP_DataNum = NumByteToWrite;
+            EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+        }else{
+            while(_NumOfPage--){
+                _EEP_DataNum = _EEPROM_PAGESIZE;
+                EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+
+                WriteAddr +=  _EEPROM_PAGESIZE;
+                pData += _EEPROM_PAGESIZE;
+            }
+            _EEP_DataNum = _NumOfSingle;
+            EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+        }
+    } else { /* WriteAddr is not EEPROM_PAGESIZE aligned  */
+        if (_NumOfPage == 0) { /* NumByteToWrite < EEPROM_PAGESIZE */
+            if (_NumOfSingle > _count) { /* (NumByteToWrite + WriteAddr) > EEPROM_PAGESIZE */
+                _temp = _NumOfSingle - _count;
+                _EEP_DataNum = _count;
+                EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+
+                WriteAddr += _count;
+                pData += _count;
+
+                _EEP_DataNum = _temp;
+                EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+            } else {
+                _EEP_DataNum = NumByteToWrite;
+                EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+            }
+        } else { /* NumByteToWrite > EEPROM_PAGESIZE */
+            NumByteToWrite -= _count;
+            _NumOfPage =  NumByteToWrite / _EEPROM_PAGESIZE;
+            _NumOfSingle = NumByteToWrite % _EEPROM_PAGESIZE;
+
+            _EEP_DataNum = _count;
+
+            EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+
+            WriteAddr += _count;
+            pData += _count;
+
+            while (_NumOfPage--) {
+                _EEP_DataNum = _EEPROM_PAGESIZE;
+
+             	EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+
+                WriteAddr +=  _EEPROM_PAGESIZE;
+                pData += _EEPROM_PAGESIZE;
+            }
+
+            if (_NumOfSingle != 0) {
+                _EEP_DataNum = _NumOfSingle;
+
+                EEP_SPI_WritePage((BYTE *)pData, WriteAddr, _EEP_DataNum);
+            }
+        }
+    }
+}
+
+void EEP_SPI_ReadBuffer(BYTE* pData, SHORT ReadAddr, SHORT NumByteToRead){
+    BYTE header[4];
+	BYTE DataIndex;
+	//USHORT rawData;
+	USHORT timeout;
+
+    header[0] = _EEPROM_READ;
+	header[1] = ReadAddr >> 16;
+    header[2] = ReadAddr >> 8;
+    header[3] = ReadAddr;
+
+	SPI1_CS_ENABLE();
+
+    /* Send WriteAddr address byte to read from */
+    EEP_SPI_SendInstruction(header, 4);
+
+	DataIndex = NumByteToRead;
+
+	while(DataIndex > 0){
+		while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+		SPI_I2S_SendData(SPI1, _DUMMY_DATA);
+
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+
+		timeout = 0;
+		do{
+			if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)			break;
+			else												timeout++;
+		}while(timeout < SPI_TIMEOUT_COUNT);
+
+		*(BYTE *)pData++ = SPI_I2S_ReceiveData(SPI1);
+ 		DataIndex--;
+#ifdef _USE_DEBUG
+#ifdef _USE_DEBUG_EEP
+		//printf("Receive EEP Data : [%x]\r\n",rawData);
+#endif
+#endif
+	}
+
+	SPI1_CS_DISABLE();
+	NOP_4;
+}
+
+BYTE EEP_SPI_ReadData(WORD ReadToAddr){
+	BYTE header[4];
+	BYTE Index = 4;
+	BYTE rawData;
+	USHORT timeout;
+
+    header[0] = _EEPROM_READ;
+	header[1] = ((ReadToAddr >> 16) & 0x01);
+    header[2] = ((ReadToAddr >> 8) & 0xff);
+    header[3] = (ReadToAddr & 0xff);
+
+	SPI1_CS_ENABLE();
+
+	while(Index > 0){
+		while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+		SPI_I2S_SendData(SPI1, (uint16_t)header[4-Index]);
+ 		Index--;
+	}
+	while(SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_BSY) != RESET);
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	if(timeout == SPI_TIMEOUT_COUNT);
+	rawData = SPI_I2S_ReceiveData(SPI1);
+	while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+	SPI_I2S_SendData(SPI1, _DUMMY_DATA);
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	rawData = SPI_I2S_ReceiveData(SPI1);
+#ifdef _USE_DEBUG
+#ifdef _USE_DEBUG_EEP
+		//printf("Receive EEP Data : [%x]\r\n",rawData);
+#endif
+#endif
+	SPI1_CS_DISABLE();
+	NOP_4;
+	return rawData;
+}
+
+BYTE EEP_SPI_WriteData(WORD WriteToAddr, BYTE WriteData){
+	BYTE header[5];
+	BYTE Index = 5;
+	SHORT rawData;
+	USHORT timeout;
+
+    header[0] = _EEPROM_WRITE;
+	header[1] = ((WriteToAddr >> 16) & 0x01);
+    header[2] = ((WriteToAddr >> 8) & 0xff);
+    header[3] = (WriteToAddr & 0xff);
+	header[4] = WriteData;
+
+	EEP_WriteEnable();
+	NOP_2;
+	SPI1_CS_ENABLE();
+
+	while(Index > 0){
+		while((SPI1->SR & SPI_I2S_FLAG_TXE) == RESET);
+		SPI_I2S_SendData(SPI1, (uint16_t)header[5-Index]);
+ 		Index--;
+	}
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_BSY) == RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+
+	timeout = 0;
+	do{
+		if((SPI1->SR & SPI_I2S_FLAG_RXNE) != RESET)		break;
+		else											timeout++;
+	}while(timeout < SPI_TIMEOUT_COUNT);
+	if(timeout == SPI_TIMEOUT_COUNT);
+	rawData = SPI_I2S_ReceiveData(SPI1);
+
+	SPI1_CS_DISABLE();
+	NOP_2;
+	EEP_WriteDisable();
+
+	return rawData;
+}
+
+void ReadMyAddr(WORD *arr)
+{
+	BYTE bTemp=0;
+
+	bTemp = (((GPIOC->IDR & GPIO_Pin_2) == RESET)<<2) |
+			(((GPIOC->IDR & GPIO_Pin_1) == RESET)<<1) |
+			(((GPIOC->IDR & GPIO_Pin_0) == RESET));
+
+	bTemp&=0x07;
+
+	for(BYTE i=0;i<4;i++){
+		ACC_Val_Read(i);
+		Delay_Ms(10);
+	}
+
+	my_address.W = (DEFAULT_DRAWER_ADDR | bTemp);
+}
+
+void GetSlotFunc(void)
+{
+	BYTE temp;
+
+	temp = 	(((GPIOI->IDR & GPIO_Pin_7) == RESET)<<2) |
+			(((GPIOI->IDR & GPIO_Pin_11) == RESET)<<1) |
+			(((GPIOC->IDR & GPIO_Pin_13) == RESET));
+
+	draw_encoder.draw_final_param = (10 + (temp & 0x07));
+
+	draw_encoder.minimum_range = ((draw_encoder.draw_enc_point[draw_encoder.draw_final_param] * SLOW_SECTION) / 100);
+//#ifdef DEBUG
+	//printf("Final Pos Encoder [%d] Min Range [%d]\r\n",draw_encoder.draw_enc_point[draw_encoder.draw_final_param],draw_encoder.minimum_range);
+//#endif
+
+	if((GPIOI->IDR & GPIO_Pin_6) == RESET)		draw_order.order_list.bit.set_access_token = true;
+	else										draw_order.order_list.bit.set_access_token = false;
+
+#ifdef DEBUG
+	printf("Final Parameter & Activate Token : [%d][%d]\r\n",draw_encoder.draw_final_param,draw_order.order_list.bit.set_access_token);
+#endif
+}
+
+void GetAccessToken(void)
+{
+	static BYTE s_bOnChat = 0, s_bOffChat = 0;;
+
+	if(draw_order.order_list.bit.set_access_token == false)		return;
+
+	if(IS_AUTHORIZING_ACCESS_TOKEN()){
+		if(s_bOffChat)		s_bOffChat = 0;
+		if(draw_order.order_list.bit.auth_access_token == false){
+			if(s_bOnChat < CHATTERING_COUNT){
+				s_bOnChat++;
+			}else{
+				s_bOnChat = 0;
+				draw_order.order_list.bit.auth_access_token = true;
+#ifdef DEBUG
+#ifdef DEBUG_TOKEN
+				printf("access token authorizing\r\n");
+#endif
+#endif
+			}
+		}
+	}else{
+		if(s_bOnChat)		s_bOnChat = 0;
+		if(draw_order.order_list.bit.auth_access_token == true){
+			if(s_bOffChat < CHATTERING_COUNT)	s_bOffChat++;
+			else{
+				s_bOffChat = 0;
+				draw_order.order_list.bit.auth_access_token = false;
+#ifdef DEBUG
+#ifdef DEBUG_TOKEN
+				printf("access token free\r\n");
+#endif
+#endif
+			}
+		}
+	}
+}
+
+void GetDrawEncoder(void){
+	static ENC_STATUS prev_encoder_status = ENC_RH;
+	static BYTE motion_count = 0;
+	static WORD	last_encoder = 0xff;
+	ENC_STATUS encoder_status;
+	ENC_STATUS encoder_status_arry[2][2] = 	 {{ENC_RH,ENC_RL},{ENC_FH,ENC_FL}};
+#if 0
+	DRAW_TACHO_STATUS encoder_direction_arry[4][4] = {{DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_CW},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_CCW},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_CCW,DRAW_TACHO_CW,DRAW_TACHO_HOLD}};
+
+	encoder_status = encoder_status_arry[(BOOL)(READ_DRAW_PHASE_A())][(BOOL)(READ_DRAW_PHASE_B())];
+#endif
+#if 1
+	DRAW_TACHO_STATUS encoder_direction_arry[4][4] = {{DRAW_TACHO_HOLD,DRAW_TACHO_CCW,DRAW_TACHO_CW,DRAW_TACHO_HOLD},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD,DRAW_TACHO_HOLD},
+											 		{DRAW_TACHO_HOLD,DRAW_TACHO_CW,DRAW_TACHO_CCW,DRAW_TACHO_HOLD}};
+
+	encoder_status = encoder_status_arry[(BOOL)(READ_DRAW_PHASE_B())][(BOOL)(READ_DRAW_PHASE_A())];
+#endif
+
+	//printf("encoder : A[%d]B[%d]\r\n", READ_DRAW_PHASE_A(),READ_DRAW_PHASE_B());
+
+	switch(encoder_direction_arry[prev_encoder_status][encoder_status]){
+		case DRAW_TACHO_CW:
+			if(Display.step == DISPLAY_SETTING){
+				if(draw_encoder.draw_tacho_cw < 65535)		draw_encoder.draw_tacho_cw++;
+			}
+			if((draw_encoder.draw_my_encoder < 65535) && (draw_order.direction == DRAW_DIR_OPEN))	draw_encoder.draw_my_encoder++;
+			//if(draw_encoder.keep_limit){
+				if((draw_status.status_list.bit.init_cmpl) && (draw_status.status_list.bit.close_limit)
+					&& (draw_encoder.draw_my_encoder > 0)){	//init complete and close limit
+					draw_status.status_list.bit.close_limit = false;
+				}
+			//}
+
+			draw_status.encoder_time = _tick_count;
+			//printf("cw[%d]\r\n",draw_encoder.draw_tacho_cw);
+		break;
+		case DRAW_TACHO_CCW:
+			if(Display.step == DISPLAY_SETTING){
+				if(draw_encoder.draw_tacho_ccw < 65535)		draw_encoder.draw_tacho_ccw++;
+			}
+			if((draw_encoder.draw_my_encoder > 0) && (draw_order.direction == DRAW_DIR_CLOSE))		draw_encoder.draw_my_encoder--;
+			draw_status.encoder_time = _tick_count;
+#if 0
+			if(draw_order.direction == DRAW_DIR_CLOSE){
+				draw_encoder.draw_tacho_ccw++;
+				if(draw_encoder.draw_my_encoder > 0){
+					draw_encoder.draw_my_encoder--;
+					draw_status.encoder_time = _tick_count;
+				}
+			}else if((draw_order.last_direction == DRAW_DIR_CLOSE) && (draw_order.direction == DRAW_DIR_NONE)){
+				draw_encoder.draw_tacho_ccw++;
+				if(draw_encoder.draw_my_encoder > 0){
+					draw_encoder.draw_my_encoder--;
+					draw_status.encoder_time = _tick_count;
+				}
+			}
+#endif
+			//printf("ccw[%d]\r\n",draw_encoder.draw_tacho_ccw);
+		break;
+	}
+
+	if(last_encoder != draw_encoder.draw_my_encoder){
+		if(draw_status.status_list.bit.abnormal_motion == false){
+			if((draw_order.order_list.bit.manual_order == false) && (draw_order.order_list.bit.remote_order == false)){
+				if(motion_count < ABNORMAL_MOTION_ERR){
+					motion_count++;
+				}else{
+					motion_count = 0;
+					draw_status.status_list.bit.abnormal_motion = true;
+				}
+			}else{
+				motion_count = 0;
+			}
+		}
+		last_encoder = draw_encoder.draw_my_encoder;
+	}
+
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+	if(last_encoder != draw_encoder.draw_my_encoder){
+		printf("enc[%d]\r\n",draw_encoder.draw_my_encoder);
+		last_encoder = draw_encoder.draw_my_encoder;
+	}
+#endif
+#endif
+
+	if(draw_order.my_location != DRAW_PARAM_UNKNOWN){
+		switch(draw_encoder.draw_final_param){
+			case DRAW_PARAM_20:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_20]){
+					draw_order.my_location = DRAW_PARAM_20;
+				}
+			case DRAW_PARAM_19:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_19]){
+					draw_order.my_location = DRAW_PARAM_19;
+				}
+			case DRAW_PARAM_18:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_18]){
+					draw_order.my_location = DRAW_PARAM_18;
+				}
+			case DRAW_PARAM_17:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_17]){
+					draw_order.my_location = DRAW_PARAM_17;
+				}
+			case DRAW_PARAM_16:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_16]){
+					draw_order.my_location = DRAW_PARAM_16;
+				}
+			case DRAW_PARAM_15:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_15]){
+					draw_order.my_location = DRAW_PARAM_15;
+				}
+			case DRAW_PARAM_14:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_14]){
+					draw_order.my_location = DRAW_PARAM_14;
+				}
+			case DRAW_PARAM_13:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_13]){
+					draw_order.my_location = DRAW_PARAM_13;
+				}
+			case DRAW_PARAM_12:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_12]){
+					draw_order.my_location = DRAW_PARAM_12;
+				}
+			case DRAW_PARAM_11:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_11]){
+					draw_order.my_location = DRAW_PARAM_11;
+				}
+			case DRAW_PARAM_10:
+				if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_01]){
+					draw_order.my_location = DRAW_PARAM_01;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_02]){
+					draw_order.my_location = DRAW_PARAM_02;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_03]){
+					draw_order.my_location = DRAW_PARAM_03;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_04]){
+					draw_order.my_location = DRAW_PARAM_04;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_05]){
+					draw_order.my_location = DRAW_PARAM_05;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_06]){
+					draw_order.my_location = DRAW_PARAM_06;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_07]){
+					draw_order.my_location = DRAW_PARAM_07;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_08]){
+					draw_order.my_location = DRAW_PARAM_08;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_09]){
+					draw_order.my_location = DRAW_PARAM_09;
+				}else if(draw_encoder.draw_my_encoder == draw_encoder.draw_enc_point[DRAW_PARAM_10]){
+					draw_order.my_location = DRAW_PARAM_10;
+				}
+				break;
+		}
+	}
+
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+	if(draw_order.last_location != draw_order.my_location){
+		printf("my location : [%d]\r\n", draw_order.my_location);
+		draw_order.last_location = draw_order.my_location;
+	}
+#endif
+#endif
+
+	if(draw_order.my_location != DRAW_PARAM_UNKNOWN){
+		if(draw_order.order_list.bit.remote_order == true){
+			if(draw_order.my_location == draw_order.order_location){
+				draw_order.order_list.bit.stop_order = true;
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+				printf("My Location Stop!!\r\n");
+#endif
+#endif
+			}
+			if(draw_order.direction == DRAW_DIR_OPEN){
+				if(draw_order.order_location == DRAW_PARAM_OPEN){
+					if((draw_encoder.draw_my_encoder == (draw_encoder.draw_enc_point[draw_encoder.draw_final_param-1] + 100) - draw_encoder.acc_dec_section + (draw_encoder.acc_dec_section / 3))
+						&& (pwm_status.pwm_list.bit.deceleration == false)){
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+						printf("Open Sensor Deceleration![%d]\r\n",(draw_encoder.draw_enc_point[draw_encoder.draw_final_param-1] + 100) - draw_encoder.acc_dec_section + (draw_encoder.acc_dec_section / 3));
+#endif
+#endif
+						pwm_status.pwm_list.bit.acceleration = false;
+						pwm_status.pwm_list.bit.deceleration = true;
+						pwm_status.pwm_list.bit.phase = false;
+						TIM7_INT_ENABLE();
+					}
+				}else{
+					if((draw_encoder.draw_my_encoder == (draw_encoder.draw_enc_point[draw_order.order_location] - draw_encoder.acc_dec_section + (draw_encoder.acc_dec_section / 3)))
+						&& (pwm_status.pwm_list.bit.deceleration == false)){
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+						printf("Open Deceleration![%d]\r\n",(draw_encoder.draw_enc_point[draw_order.order_location] - draw_encoder.acc_dec_section + (draw_encoder.acc_dec_section / 3)));
+#endif
+#endif
+						pwm_status.pwm_list.bit.acceleration = false;
+						pwm_status.pwm_list.bit.deceleration = true;
+						pwm_status.pwm_list.bit.phase = false;
+						TIM7_INT_ENABLE();
+					}
+				}
+			}else if(draw_order.direction == DRAW_DIR_CLOSE){
+				if((draw_encoder.draw_my_encoder == (draw_encoder.draw_enc_point[draw_order.order_location] + draw_encoder.acc_dec_section - (draw_encoder.acc_dec_section / 3)))
+					&& (pwm_status.pwm_list.bit.deceleration == false)){
+#ifdef DEBUG
+#ifdef DEBUG_ENCODER
+					printf("Close Deceleration![%d]\r\n",(draw_encoder.draw_enc_point[draw_order.order_location] + draw_encoder.acc_dec_section - (draw_encoder.acc_dec_section / 3)));
+#endif
+#endif
+					pwm_status.pwm_list.bit.acceleration = false;
+					pwm_status.pwm_list.bit.deceleration = true;
+					pwm_status.pwm_list.bit.phase = false;
+					TIM7_INT_ENABLE();
+				}
+			}
+		}
+	}
+	prev_encoder_status = encoder_status;
+}
+
+void DrawerAccRatioProc(void)
+{
+	if(draw_order.order_location == DRAW_PARAM_OPEN){
+		draw_encoder.overall_range = (draw_encoder.draw_enc_point[draw_encoder.draw_final_param-1] + 100) - draw_encoder.draw_enc_point[draw_order.my_location];
+	}else{
+		if(draw_encoder.draw_enc_point[draw_order.order_location] > draw_encoder.draw_my_encoder){
+			draw_encoder.overall_range = draw_encoder.draw_enc_point[draw_order.order_location] - draw_encoder.draw_my_encoder;
+		}else{
+			draw_encoder.overall_range = draw_encoder.draw_my_encoder - draw_encoder.draw_enc_point[draw_order.order_location];
+		}
+	}
+
+	//if(draw_encoder.overall_range <= MINIMUM_ENC_RANGE){
+	if(draw_encoder.overall_range <= draw_encoder.minimum_range){
+		pwm_status.pwm_list.bit.slow_section = true;
+	}else{
+		pwm_status.pwm_list.bit.slow_section = false;
+	}
+
+	//if(draw_encoder.overall_range > MINIMUM_ENC_RANGE){
+	if(draw_encoder.overall_range > draw_encoder.minimum_range){
+		draw_encoder.unit = (draw_encoder.overall_range / 100);
+	}else{
+		draw_encoder.unit = ((double)draw_encoder.overall_range / 100.0);
+	}
+	draw_encoder.float_acc_dec = (draw_encoder.unit * ACC_DEC_RATIO);
+	draw_encoder.acc_dec_section = round(draw_encoder.float_acc_dec);
+
+	if(draw_encoder.acc_dec_section >= ACC_DEC_LIMIT)		draw_encoder.acc_dec_section = ACC_DEC_LIMIT;
+
+	draw_encoder.stable_section = draw_encoder.overall_range - (draw_encoder.acc_dec_section * 2);
+#ifdef DEBUG
+#ifdef DEBUG_PWM_RATIO
+	printf("overall:[%d] unit[%+f] acc[%d] stable[%d]\r\n",draw_encoder.overall_range,draw_encoder.unit,draw_encoder.acc_dec_section,draw_encoder.stable_section);
+#endif
+#endif
+	if(pwm_status.pwm_list.bit.slow_section == false)		SineAccelerationTable((draw_encoder.acc_dec_section * 2), acc_freq_array[ACC_MIN], acc_freq_array[ACC_MAX]);
+	else													SineAccelerationTable((draw_encoder.acc_dec_section * 2), acc_freq_array[ACC_SLOW_MIN], acc_freq_array[ACC_SLOW_MAX]);
+}
+
+
+
+void DrawerLoopTest(void)
+{
+	static WORD last_time;
+	//static BYTE s_bLast = 0xff;
+	static BOOL first_loop = true;
+#if 0
+	if(s_bLast != draw_order.loop_step){
+		printf("loop step : %d\r\n",draw_order.loop_step);
+		s_bLast = draw_order.loop_step;
+	}
+#endif
+	if(draw_order.loop_order == true){
+		if(draw_order.loop_err){
+			draw_order.loop_order = false;
+			draw_order.loop_err = false;
+			draw_order.loop_step = 0;
+			draw_status.status_list.bit.encoder_error = false;
+			draw_status.status_list.bit.timeout = false;
+			first_loop = true;
+			printf("Loop Stop!!\r\n");
+			return;
+		}
+
+		switch(draw_order.loop_step){
+			case 0:
+				switch(draw_order.my_location){
+					case DRAW_PARAM_CLOSE:
+						draw_order.last_direction = draw_order.direction;
+						draw_order.order_location = DRAW_PARAM_OPEN;
+						if(first_loop)		first_loop = false;
+						break;
+					case DRAW_PARAM_01:
+					case DRAW_PARAM_02:
+					case DRAW_PARAM_03:
+					case DRAW_PARAM_04:
+					case DRAW_PARAM_05:
+					case DRAW_PARAM_06:
+					case DRAW_PARAM_07:
+					case DRAW_PARAM_08:
+					case DRAW_PARAM_09:
+					case DRAW_PARAM_10:
+					case DRAW_PARAM_11:
+					case DRAW_PARAM_12:
+					case DRAW_PARAM_13:
+					case DRAW_PARAM_14:
+					case DRAW_PARAM_15:
+					case DRAW_PARAM_16:
+					case DRAW_PARAM_17:
+					case DRAW_PARAM_18:
+					case DRAW_PARAM_19:
+					case DRAW_PARAM_20:
+					case DRAW_PARAM_OPEN:
+					case DRAW_PARAM_UNKNOWN:
+						draw_order.last_direction = draw_order.direction;
+						draw_order.order_location = DRAW_PARAM_CLOSE;
+						if(first_loop){
+							first_loop = false;
+							draw_encoder.draw_my_encoder = 1000;
+						}
+						break;
+				}
+				//printf("Order Location Encoder : [%d]%d\r\n",draw_order.order_location,draw_encoder.draw_enc_point[draw_order.order_location]);
+				draw_order.loop_step = 1;
+				break;
+			case 1:
+				if(draw_order.my_location == draw_order.order_location){
+					if((draw_order.order_location != DRAW_PARAM_CLOSE) && (draw_order.order_location != DRAW_PARAM_OPEN)){
+						if(draw_encoder.draw_my_encoder > (draw_encoder.draw_enc_point[draw_order.order_location] + MINIMUM_INTERVAL)){
+							if(draw_order.order_location < DRAW_PARAM_OPEN)		draw_order.my_location++;
+							draw_order.direction = DRAW_DIR_CLOSE;
+							draw_order.order_list.bit.remote_order = true;
+							draw_status.status_list.bit.active = true;
+						}else if(draw_encoder.draw_my_encoder < (draw_encoder.draw_enc_point[draw_order.my_location] - MINIMUM_INTERVAL)){
+							if(draw_order.order_location > DRAW_PARAM_CLOSE)			draw_order.my_location--;
+							draw_order.direction = DRAW_DIR_OPEN;
+							draw_order.order_list.bit.remote_order = true;
+							draw_status.status_list.bit.active = true;
+						}else{
+							draw_order.direction = DRAW_DIR_NONE;
+						}
+					}
+				}else{
+					if((draw_order.my_location < draw_order.order_location)
+						&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+						draw_order.direction = DRAW_DIR_OPEN;
+						DrawerAccRatioProc();
+						draw_order.order_list.bit.remote_order = true;
+						draw_status.status_list.bit.active = true;
+					}else if((draw_order.my_location > draw_order.order_location)
+					&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+						draw_order.direction = DRAW_DIR_CLOSE;
+						DrawerAccRatioProc();
+						draw_order.order_list.bit.remote_order = true;
+						draw_status.status_list.bit.active = true;
+					}else if((draw_order.my_location < draw_order.order_location)
+						&&(draw_encoder.draw_my_encoder > draw_encoder.draw_enc_point[draw_order.order_location])){
+						draw_order.direction = DRAW_DIR_CLOSE;
+						DrawerAccRatioProc();
+						draw_order.order_list.bit.remote_order = true;
+						draw_status.status_list.bit.active = true;
+					}else if((draw_order.my_location > draw_order.order_location)
+						&&(draw_encoder.draw_my_encoder < draw_encoder.draw_enc_point[draw_order.order_location])){
+						draw_order.direction = DRAW_DIR_OPEN;
+						DrawerAccRatioProc();
+						draw_order.order_list.bit.remote_order = true;
+						draw_status.status_list.bit.active = true;
+					}
+				}
+				draw_order.loop_step = 2;
+				last_time = _tick_count;
+				break;
+			case 2:
+				if(GetElapsedTickCount(last_time) >= 500){
+					if(draw_order.order_location == DRAW_PARAM_OPEN)			draw_order.loop_step = 3;
+					else if(draw_order.order_location == DRAW_PARAM_CLOSE)		draw_order.loop_step = 4;
+
+					last_time = _tick_count;
+				}
+				break;
+			case 3:
+				if(draw_order.my_location == DRAW_PARAM_OPEN){
+					draw_order.loop_step = 5;
+					last_time = _tick_count;
+					draw_order.loop_cnt++;
+					TextBox_Input(Display.Text_Encoder_arr,draw_order.loop_cnt);
+					EDIT_SetText(Editor.EDIT_DRAWER[Display.layer],(const char *)Display.Text_Encoder_arr);
+				}
+
+				if((draw_status.status_list.bit.timeout) || (draw_status.status_list.bit.encoder_error)){
+					draw_order.loop_step = 0;
+					draw_order.loop_err = true;
+					//printf("Error!!\r\n");
+				}
+				break;
+			case 4:
+				if(draw_order.my_location == DRAW_PARAM_CLOSE){
+					draw_order.loop_step = 5;
+					last_time = _tick_count;
+					draw_order.loop_cnt++;
+					TextBox_Input(Display.Text_Encoder_arr,draw_order.loop_cnt);
+					EDIT_SetText(Editor.EDIT_DRAWER[Display.layer],(const char *)Display.Text_Encoder_arr);
+				}
+
+				if((draw_status.status_list.bit.timeout) || (draw_status.status_list.bit.encoder_error)){
+					draw_order.loop_step = 0;
+					draw_order.loop_err = true;
+					//printf("Error!!\r\n");
+				}
+				break;
+			case 5:
+				if(GetElapsedTickCount(last_time) >= 1000){
+					draw_order.loop_step = 0;
+					last_time = _tick_count;
+				}
+				break;
+
+		}
+	}else{
+		if(draw_order.loop_step != 0){
+			draw_order.loop_step = 0;
+		}
+	}
+}
+
+void DrawerOperationProc(void)
+{
+	static BYTE s_bStatus = 0;
+
+	if(draw_status.status_list.bit.close_limit == true){
+		if(draw_status.status_list.bit.close == false)		draw_status.status_list.bit.close = true;
+	}else{
+		if(draw_status.status_list.bit.close == true)		draw_status.status_list.bit.close = false;
+	}
+
+	if(s_bStatus != draw_status.status_list.byte[0]){
+#ifdef DEBUG
+#ifdef DEBUG_OPERATION
+		printf("Status [%x] last Dir[%d] Curr Dir[%d]\r\n",draw_status.status_list.byte[0],draw_order.last_direction,draw_order.direction);
+#endif
+#endif
+		s_bStatus = draw_status.status_list.byte[0];
+	}
+
+	if(draw_order.order_list.bit.stop_order == true){
+		if(draw_order.order_list.bit.fault_handling == true){
+			draw_order.order_list.bit.fault_handling = false;
+			draw_order.fault_location = false;
+			Display.step = DISPLAY_MAIN;
+		}
+
+		draw_order.order_list.bit.stop_order = false;
+
+		draw_order.order_list.bit.manual_order = false;
+		draw_order.order_list.bit.remote_order = false;
+		draw_order.move_order = false;
+
+		draw_status.status_list.bit.active = false;
+		draw_status.status_list.bit.manual = false;
+
+		draw_status.status_list.bit.active_lock = false;
+		draw_status.status_list.bit.manual_lock = false;
+
+		draw_order.last_direction = draw_order.direction;
+		draw_order.direction = DRAW_DIR_NONE;
+		AC_MOTOR_BRAKE();
+		pwm_status.pwm_list.bit.operation = false;
+
+		draw_status.encoder_time = _tick_count;
+		draw_status.timeout_time = _tick_count;
+		draw_order.order_list.bit.watchdog = false;
+
+		button_status.step = CLICK_IDLE;
+
+		pwm_status.pwm_list.bit.deceleration = false;
+		pwm_status.pwm_list.bit.acceleration = false;
+		pwm_status.pwm_list.bit.slow_section = false;
+
+		if(Display.step == DISPLAY_SETTING){				//2019-10-25 -LMI-
+			draw_encoder.elapsed_time = GetElapsedTickCount(draw_encoder.elapsed_time);
+			Disp_ElapsedTime();
+		}
+#ifdef DEBUG
+#ifdef DEBUG_OPERATION
+		printf("STOP\r\n");
+#endif
+#endif
+	}
+
+	if(draw_order.order_list.bit.remote_order == true){
+		if(draw_order.order_list.bit.manual_order == false){
+		//if(draw_status.status_list.bit.active_lock == false){
+			if(draw_order.last_direction != draw_order.direction){
+				if(Display.step == DISPLAY_SETTING){		//2019-10-25 -LMI-
+					draw_encoder.elapsed_time = _tick_count;
+				}
+				switch(draw_order.direction){
+					case DRAW_DIR_OPEN:
+						AC_MOTOR_CW();
+						draw_status.encoder_time = _tick_count;
+						pwm_status.reload = 0;
+						pwm_status.pwm_list.bit.acceleration = true;
+						pwm_status.pwm_list.bit.operation = true;
+						TIM7_INT_ENABLE();
+						draw_status.timeout_time = _tick_count;
+						draw_status.encoder_time = _tick_count;
+						draw_order.order_list.bit.watchdog = true;
+						if(Display.step == DISPLAY_SETTING){
+							draw_encoder.draw_tacho_cw = 0;
+							draw_encoder.draw_tacho_ccw = 0;
+						}
+						//draw_encoder.keep_limit = false;
+#ifdef DEBUG
+#ifdef DEBUG_OPERATION
+						printf("AP OPEN\r\n");
+#endif
+#endif
+						break;
+					case DRAW_DIR_CLOSE:
+						AC_MOTOR_CCW();
+						draw_status.encoder_time = _tick_count;
+						pwm_status.reload = 0;
+						pwm_status.pwm_list.bit.acceleration = true;
+						pwm_status.pwm_list.bit.operation = true;
+						TIM7_INT_ENABLE();
+						draw_status.timeout_time = _tick_count;
+						draw_status.encoder_time = _tick_count;
+						draw_order.order_list.bit.watchdog = true;
+						if(Display.step == DISPLAY_SETTING){
+							draw_encoder.draw_tacho_cw = 0;
+							draw_encoder.draw_tacho_ccw = 0;
+						}
+						//draw_encoder.keep_limit = false;
+#ifdef DEBUG
+#ifdef DEBUG_OPERATION
+						printf("AP CLOSE\r\n");
+#endif
+#endif
+						break;
+				}
+#ifdef DEBUG
+#ifdef DEBUG_OPERATION
+				printf("last dir[%d] curr dir[%d]\r\n",draw_order.last_direction,draw_order.direction);
+#endif
+#endif
+				draw_order.last_direction = draw_order.direction;
+			}
+		}
+	}
+}
+
+void DrawerWatchDog(void)
+{
+	if(draw_order.order_list.bit.watchdog == true){
+		if((GetElapsedTickCount(draw_status.encoder_time) >= ENCODER_TIMEOUT) && (draw_status.status_list.bit.init_cmpl == true))
+		{
+			draw_order.order_list.bit.stop_order = true;
+			draw_status.status_list.bit.encoder_error = true;
+
+			if(draw_order.order_list.bit.set_access_token){
+				if(draw_encoder.draw_my_encoder == 0){
+					ACCESS_TOKEN_ENABLE();
+				}
+			}
+		}
+
+		if(GetElapsedTickCount(draw_status.timeout_time) >= MOTOR_TIMEOUT)
+		{
+			draw_order.order_list.bit.stop_order = true;
+			draw_status.status_list.bit.timeout = true;
+
+			if(draw_order.order_list.bit.set_access_token){
+				if(draw_encoder.draw_my_encoder == 0){
+					ACCESS_TOKEN_ENABLE();
+				}
+			}
+		}
+	}
+}
+
+void PutEncoder(WORD location_param, WORD encoder){
+	BYTE rawData[2];
+	SHORT eep_addr;
+
+	rawData[0] = (BYTE)(encoder & 0xff);
+	rawData[1] = (BYTE)((encoder >> 8) & 0xff);
+
+	switch(location_param){
+		case DRAW_PARAM_CLOSE:
+			eep_addr = _EEPROM_DRAW_PARAM_CLOSE_INFO;
+			break;
+		case DRAW_PARAM_01:
+			eep_addr = _EEPROM_DRAW_PARAM_01_INFO;
+			break;
+		case DRAW_PARAM_02:
+			eep_addr = _EEPROM_DRAW_PARAM_02_INFO;
+			break;
+		case DRAW_PARAM_03:
+			eep_addr = _EEPROM_DRAW_PARAM_03_INFO;
+			break;
+		case DRAW_PARAM_04:
+			eep_addr = _EEPROM_DRAW_PARAM_04_INFO;
+			break;
+		case DRAW_PARAM_05:
+			eep_addr = _EEPROM_DRAW_PARAM_05_INFO;
+			break;
+		case DRAW_PARAM_06:
+			eep_addr = _EEPROM_DRAW_PARAM_06_INFO;
+			break;
+		case DRAW_PARAM_07:
+			eep_addr = _EEPROM_DRAW_PARAM_07_INFO;
+			break;
+		case DRAW_PARAM_08:
+			eep_addr = _EEPROM_DRAW_PARAM_08_INFO;
+			break;
+		case DRAW_PARAM_09:
+			eep_addr = _EEPROM_DRAW_PARAM_09_INFO;
+			break;
+		case DRAW_PARAM_10:
+			eep_addr = _EEPROM_DRAW_PARAM_10_INFO;
+			break;
+		case DRAW_PARAM_11:
+			eep_addr = _EEPROM_DRAW_PARAM_11_INFO;
+			break;
+		case DRAW_PARAM_12:
+			eep_addr = _EEPROM_DRAW_PARAM_12_INFO;
+			break;
+		case DRAW_PARAM_13:
+			eep_addr = _EEPROM_DRAW_PARAM_13_INFO;
+			break;
+		case DRAW_PARAM_14:
+			eep_addr = _EEPROM_DRAW_PARAM_14_INFO;
+			break;
+		case DRAW_PARAM_15:
+			eep_addr = _EEPROM_DRAW_PARAM_15_INFO;
+			break;
+		case DRAW_PARAM_16:
+			eep_addr = _EEPROM_DRAW_PARAM_16_INFO;
+			break;
+		case DRAW_PARAM_17:
+			eep_addr = _EEPROM_DRAW_PARAM_17_INFO;
+			break;
+		case DRAW_PARAM_18:
+			eep_addr = _EEPROM_DRAW_PARAM_18_INFO;
+			break;
+		case DRAW_PARAM_19:
+			eep_addr = _EEPROM_DRAW_PARAM_19_INFO;
+			break;
+		case DRAW_PARAM_20:
+			eep_addr = _EEPROM_DRAW_PARAM_20_INFO;
+			break;
+		case DRAW_PARAM_OPEN:
+			eep_addr = _EEPROM_DRAW_PARAM_OPEN_INFO;
+			break;
+	}
+#ifdef DEBUG
+#ifdef DEBUG_EEPROM_DISP
+	printf("location:[%d] encoder:[%d]\r\n",location_param,encoder);
+#endif
+#endif
+	EEP_SPI_WriteBuffer((BYTE *)rawData, eep_addr, 2);
+	draw_encoder.draw_enc_point[location_param] = encoder;
+}
+
+
+void PutEncPoint(void)
+{
+	BYTE rawData[_EEPROM_DRAW_PARAM_OPEN_INFO+2] = {0,};
+
+	memset(rawData,0,sizeof(BYTE)*_EEPROM_DRAW_PARAM_OPEN_INFO);
+
+	for(BYTE i=DRAW_PARAM_CLOSE; i<DRAW_PARAM_OPEN; i++){
+		rawData[(i*2)] = (BYTE)(draw_encoder.draw_enc_point[i] & 0xff);
+		rawData[(i*2)+1] |= (BYTE)((draw_encoder.draw_enc_point[i]>>8) & 0xff);
+#ifdef DEBUG
+#ifdef DEBUG_EEPROM_DISP
+		printf("[%x %x]\r\n",rawData[(i*2)],rawData[(i*2)+1]);
+#endif
+#endif
+	}
+	EEP_SPI_WriteBuffer((BYTE *)rawData, _EEPROM_DRAW_PARAM_CLOSE_INFO, (_EEPROM_READ_ENCPOINT * 2));
+}
+
+void GetEncPoint(void)
+{
+	BYTE rawData[_EEPROM_DRAW_PARAM_OPEN_INFO+2];
+	static BYTE s_bmemrst = 0;
+	static WORD enc_level = 100;
+
+	EEP_SPI_ReadBuffer((BYTE *)rawData, _EEPROM_DRAW_PARAM_CLOSE_INFO, (_EEPROM_READ_ENCPOINT * 2));
+
+	for(BYTE i=1; i<=DRAW_PARAM_OPEN; i++){
+		draw_encoder.draw_enc_point[i] = (WORD)(rawData[(i*2)]);
+		draw_encoder.draw_enc_point[i] |= (WORD)((rawData[(i*2)+1] << 8) & 0xff00);
+		draw_encoder.draw_enc_point[DRAW_PARAM_CLOSE] = CLOSE_ENCODER;
+		draw_encoder.draw_enc_point[DRAW_PARAM_OPEN] = OPEN_ENCODER;
+
+#ifdef DEBUG
+#ifdef DEBUG_EEPROM_DISP
+		printf("Get Encoder[%d] : [%d]\r\n",i,draw_encoder.draw_enc_point[i]);
+#endif
+#endif
+		if(draw_encoder.draw_enc_point[i] == OPEN_ENCODER){
+			s_bmemrst++;
+		}
+	}
+
+	if(s_bmemrst == draw_encoder.draw_final_param-1)
+	{
+		draw_encoder.draw_enc_point[DRAW_PARAM_CLOSE] = CLOSE_ENCODER;
+		draw_encoder.draw_enc_point[DRAW_PARAM_OPEN] = OPEN_ENCODER;
+		for(BYTE i=DRAW_PARAM_01; i<=(DRAW_PARAM_OPEN-1); i++){
+			draw_encoder.draw_enc_point[i] = enc_level;
+			enc_level+=100;
+		}
+		PutEncPoint();
+	}
+}
+
+void DrawStatusUpdate(void)
+{
+	draw_status.status_list.word = false;
+	draw_order.order_list.word = false;
+
+	draw_status.status_list.bit.reseted = 1;
+
+	if(RCC_GetFlagStatus(RCC_FLAG_PINRST)){
+		draw_status.status_list.bit.PINRST = 1;
+	}
+	if(RCC_GetFlagStatus(RCC_FLAG_PORRST)){
+		draw_status.status_list.bit.PORRST = 1;
+	}
+	if(RCC_GetFlagStatus(RCC_FLAG_IWDGRST)){
+		draw_status.status_list.bit.IWDGRST = 1;
+	}
+    if(RCC_GetFlagStatus(RCC_FLAG_LPWRRST)){
+		draw_status.status_list.bit.LPWRRST = 1;
+	}
+
+	draw_encoder.draw_my_encoder = 0;
+	draw_encoder.draw_tacho_cw = 0;
+	draw_encoder.draw_tacho_ccw = 0;
+	draw_status.status_list.bit.close = false;
+	draw_encoder.elapsed_time = 0;
+
+	GetSlotFunc();
+
+	if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) != RESET)){		//2019-10-25 -LMI-
+		draw_order.my_location = DRAW_PARAM_CLOSE;
+		draw_status.status_list.bit.init_cmpl = true;
+		draw_status.status_list.bit.open_limit = false;
+		draw_status.status_list.bit.close_limit = true;
+		draw_status.status_list.bit.close = true;
+		if(draw_order.order_list.bit.set_access_token == true){
+			ACCESS_TOKEN_ENABLE();
+		}
+		//printf("Sensor both side checked\r\n");
+	}else if(((GPIOG->IDR & GPIO_Pin_2) != RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+		draw_order.my_location = DRAW_PARAM_OPEN;
+		draw_status.status_list.bit.init_cmpl = false;
+		draw_status.status_list.bit.open_limit = true;
+		draw_status.status_list.bit.close_limit = false;
+		if(draw_order.order_list.bit.set_access_token == true){
+			ACCESS_TOKEN_DISABLE();
+		}
+		//printf("Sensor open side checked");
+	}else if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+		draw_order.my_location = DRAW_PARAM_UNKNOWN;
+		draw_status.status_list.bit.init_cmpl = false;
+		draw_status.status_list.bit.open_limit = false;
+		draw_status.status_list.bit.close_limit = false;
+		if(draw_order.order_list.bit.set_access_token == true){
+			ACCESS_TOKEN_DISABLE();
+		}
+		//printf("Sensor not checked\r\n");
+	}
+
+	draw_order.loop_step =0;
+
+	button_status.step = CLICK_IDLE;
+}
+
+void EXTI9_5_IRQHandler(void)
+{
+	if((EXTI->PR & EXTI_Line7) != RESET){				//Draw Encoder
+		EXTI->PR = EXTI_Line7;
+		GetDrawEncoder();
+	}
+
+	if((EXTI->PR & EXTI_Line6) != RESET){				//Draw Encoder
+		EXTI->PR = EXTI_Line6;
+		GetDrawEncoder();
+	}
+}
+
+void EXTI0_IRQHandler(void)							//Origin Sensor
+{
+	if((EXTI->PR & EXTI_Line0) != RESET){
+		EXTI->PR = EXTI_Line0;
+	}
+}
+
+void SineAccelerationTable(WORD array_size, WORD min_freq, WORD max_freq)
+{
+	WORD interval;
+	double unit, stdval, interval_unit;
+
+	pwm_status.table_size = array_size;
+	unit = stdval = (90.0 / array_size);
+	interval = min_freq - max_freq;
+	interval_unit = (interval / 100);
+
+	for(WORD i = 0; i<=array_size; i+=1){
+		sine_acc[i] = sin((PH*stdval) / 180.0);				//sin(2n¥ð * ¥È) = sin(n¥ð * 2¥È)
+	 	sine_acc[i] = (sine_acc[i] * interval_unit);
+		sine_acc_32[i] = (sine_acc[i] * 100);
+		sine_acc_32[i] = min_freq - sine_acc_32[i];
+		stdval+=unit;
+	}
+}
+
+void EXTI1_IRQHandler(void)							//Spare Sensor
+{
+	if((EXTI->PR & EXTI_Line1) != RESET){
+		EXTI->PR = EXTI_Line1;
+		if(draw_order.order_list.bit.set_access_token){
+			if(IS_AUTHORIZING_ACCESS_TOKEN()){
+				draw_order.order_list.bit.auth_access_token = true;
+				//draw_order.order_list.bit.display = true;
+			}else{
+				draw_order.order_list.bit.auth_access_token = false;
+				//draw_order.order_list.bit.display = true;
+			}
+		}
+	}
+}
+
+void DisplayMainToken(void)
+{
+	switch(Display.step){
+		case DISPLAY_MAIN:
+		case DISPLAY_MAIN_LOCK:
+			if(draw_order.order_list.bit.auth_access_token != draw_order.order_list.bit.display_token){
+				if(draw_order.order_list.bit.auth_access_token){
+					Draw_Mainlock();
+				}else{
+					Draw_Main();
+				}
+			}
+			break;
+	}
+}
+
+void DisplayChanges(void)
+{
+	if(draw_status.lastPos != draw_status.status_list.bit.close_limit){		//Refresh the open/close Icon
+		switch(Display.step){
+			case DISPLAY_MAIN:
+			case DISPLAY_MAIN_LOCK:
+			case DISPLAY_DISPENSE:
+			case DISPLAY_REFILL:
+				WM_Paint(_hDialogKeypad[Display.layer]);
+				break;
+		}
+		draw_status.lastPos = draw_status.status_list.bit.close_limit;
+	}
+
+	if(draw_order.order_list.bit.set_access_token){							//Changed background
+		if(draw_order.order_list.bit.auth_access_token != draw_order.order_list.bit.display_token){
+			switch(Display.step){
+				case DISPLAY_MAIN:
+				case DISPLAY_MAIN_LOCK:
+					if(draw_order.order_list.bit.auth_access_token){
+						Draw_Mainlock();
+					}else{
+						Draw_Main();
+					}
+					break;
+			}
+		}
+	}
+}
+
+void SensorInputProc(void)
+{
+	static BOOL SenInit = true;
+	static BYTE SenChat = 0;
+	static BYTE lastPos = 0xff;
+
+	if(SenInit){
+		SenInit = false;
+		draw_order.direction = DRAW_DIR_NONE;
+		draw_order.my_location = DRAW_PARAM_UNKNOWN;
+	}
+
+	if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) != RESET)){		//2019-10-25 -LMI-
+		draw_status.senpos = SEN_CLOSEPOS;
+	}else if(((GPIOG->IDR & GPIO_Pin_2) != RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+		draw_status.senpos = SEN_OPENPOS;
+	}else if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+		draw_status.senpos = SEN_UNPOS;
+	}
+#if 0
+	if((GetElapsedTickCount(draw_encoder.limit_time) >= 100) && (draw_encoder.keep_limit == false)){
+		draw_encoder.keep_limit = true;
+	}
+#endif
+	if(draw_status.senpos != lastPos){
+
+		if(SenChat < SENSOR_CHECK_TIME)			SenChat++;
+		else{
+			SenChat = 0;
+			//printf("SENSOR POS CHANGED : [%d]\r\n",draw_status.senpos);
+			switch(draw_status.senpos){
+				case SEN_CLOSEPOS:
+					if(draw_status.status_list.bit.init_cmpl == false){
+						draw_status.status_list.bit.init_cmpl = true;
+					}
+
+					draw_order.order_list.bit.stop_order = true;
+					draw_status.status_list.bit.manual = false;
+					draw_status.status_list.bit.active = false;
+					draw_encoder.draw_my_encoder = 0;
+
+					draw_order.my_location = DRAW_PARAM_CLOSE;
+					draw_status.status_list.bit.open_limit = false;
+					draw_status.status_list.bit.close_limit = true;
+					draw_status.status_list.bit.close = true;
+
+					if(draw_order.order_list.bit.set_access_token){
+						ACCESS_TOKEN_ENABLE();
+					}
+					draw_encoder.limit_time = _tick_count;
+					break;
+				case SEN_OPENPOS:
+					switch(draw_order.my_location){
+						case DRAW_PARAM_CLOSE:
+						case DRAW_PARAM_01:
+						case DRAW_PARAM_02:
+						case DRAW_PARAM_03:
+						case DRAW_PARAM_04:
+						case DRAW_PARAM_05:
+						case DRAW_PARAM_06:
+						case DRAW_PARAM_07:
+						case DRAW_PARAM_08:
+						case DRAW_PARAM_09:
+						case DRAW_PARAM_10:
+						case DRAW_PARAM_11:
+						case DRAW_PARAM_12:
+						case DRAW_PARAM_13:
+						case DRAW_PARAM_14:
+						case DRAW_PARAM_15:
+						case DRAW_PARAM_16:
+						case DRAW_PARAM_17:
+						case DRAW_PARAM_18:
+						case DRAW_PARAM_19:
+						case DRAW_PARAM_20:
+						case DRAW_PARAM_OPEN:
+						case DRAW_PARAM_UNKNOWN:
+								draw_order.order_list.bit.stop_order = true;
+								draw_status.status_list.bit.manual = false;
+								draw_status.status_list.bit.active = false;
+
+								draw_order.my_location = DRAW_PARAM_OPEN;
+								draw_status.status_list.bit.open_limit = true;
+							break;
+					}
+					break;
+				case SEN_UNPOS:
+					if((draw_order.my_location != DRAW_PARAM_OPEN) || (draw_order.my_location != DRAW_PARAM_CLOSE)){
+						draw_status.status_list.bit.open_limit = false;
+						draw_status.status_list.bit.close_limit = false;
+						draw_status.status_list.bit.close = false;
+					}
+					break;
+			}
+
+			lastPos = draw_status.senpos;
+		}
+	}else{
+		if(SenChat != 0)	SenChat = 0;
+	}
+}
+
+void EXTI2_IRQHandler(void)							//Open Sensor
+{
+	if((EXTI->PR & EXTI_Line2) != RESET){
+		EXTI->PR = EXTI_Line2;
+#if 0
+		if(((GPIOG->IDR & GPIO_Pin_2) != RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+			if(draw_order.direction == DRAW_DIR_OPEN){
+
+				draw_order.order_list.bit.stop_order = true;
+				draw_status.status_list.bit.manual = false;
+				draw_status.status_list.bit.active = false;
+
+				draw_order.my_location = DRAW_PARAM_OPEN;
+				draw_status.status_list.bit.open_limit = true;
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+				printf("Sensor open side checked\r\n");
+#endif
+#endif
+			}
+		}else if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+			if(draw_order.direction == DRAW_DIR_CLOSE){
+				draw_status.status_list.bit.open_limit = false;
+			}else if(draw_order.direction == DRAW_DIR_OPEN){
+				draw_status.status_list.bit.close_limit = false;
+			}
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+			printf("Sensor not checked\r\n");
+#endif
+#endif
+		}else if(((GPIOG->IDR & GPIO_Pin_2) != RESET) && ((GPIOG->IDR & GPIO_Pin_3) != RESET)){
+			if(draw_status.status_list.bit.init_cmpl == false)		draw_status.status_list.bit.init_cmpl = true;
+
+			draw_order.order_list.bit.stop_order = true;
+			draw_status.status_list.bit.manual = false;
+			draw_status.status_list.bit.active = false;
+			draw_encoder.draw_my_encoder = 0;
+
+			draw_order.my_location = DRAW_PARAM_CLOSE;
+			draw_status.status_list.bit.open_limit = false;
+			draw_status.status_list.bit.close_limit = true;
+			draw_status.status_list.bit.close = true;
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+			printf("Sensor both sides\r\n");
+#endif
+#endif
+		}
+#endif
+	}
+}
+
+void EXTI3_IRQHandler(void)							//Close Sensor
+{
+	if((EXTI->PR & EXTI_Line3) != RESET){
+		EXTI->PR = EXTI_Line3;
+#if 0
+		if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) == RESET)){
+			if(draw_order.direction == DRAW_DIR_CLOSE){
+				draw_status.status_list.bit.open_limit = false;
+			}else if(draw_order.direction == DRAW_DIR_OPEN){
+				draw_status.status_list.bit.close_limit = false;
+			}
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+			printf("Sensor not Check!\r\n");
+#endif
+#endif
+		}else if(((GPIOG->IDR & GPIO_Pin_2) != RESET) && ((GPIOG->IDR & GPIO_Pin_3) != RESET)){
+
+			if(draw_status.status_list.bit.init_cmpl == false)		draw_status.status_list.bit.init_cmpl = true;
+			draw_order.order_list.bit.stop_order = true;
+			draw_status.status_list.bit.manual = false;
+			draw_status.status_list.bit.active = false;
+			draw_encoder.draw_my_encoder = 0;
+
+			draw_order.my_location = DRAW_PARAM_CLOSE;
+			draw_status.status_list.bit.open_limit = false;
+			draw_status.status_list.bit.close_limit = true;
+			draw_status.status_list.bit.close = true;
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+			printf("Sensor both side!\r\n");
+#endif
+#endif
+		}else if(((GPIOG->IDR & GPIO_Pin_2) == RESET) && ((GPIOG->IDR & GPIO_Pin_3) != RESET)){
+#ifdef DEBUG
+#ifdef DEBUG_SENSOR_DISP
+			printf("Sensor close side!\r\n");
+#endif
+#endif
+		}
+#endif
+	}
+}
+
